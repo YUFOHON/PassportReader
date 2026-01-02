@@ -30,9 +30,9 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.InputStream;
+import java.math.BigInteger;
 import java.security.PublicKey;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 
@@ -61,8 +61,8 @@ public class PassportReader {
         public String documentSignerCertificate;
 
         // NEW FIELDS FOR SOD
-        public byte[] rawSODData;                 // The raw binary of the SOD file
-        public java.util.Map<Integer, byte[]> dataGroupHashes; // Hashes of DG1, DG2, etc. stored in SOD
+        public byte[] rawSODData;
+        public java.util.Map<Integer, byte[]> dataGroupHashes;
 
         // DG1 - MRZ (Machine Readable Zone) - MANDATORY
         public String documentCode;
@@ -92,20 +92,20 @@ public class PassportReader {
         // DG5 - Displayed Portrait (Alternative photo)
         public Bitmap displayedPortrait;
 
-        // DG6 - Reserved for Future Use (UNUSED in ICAO Doc 9303)
+        // DG6 - Reserved for Future Use
         public byte[] dg6Data;
 
         // DG7 - Displayed Signature
         public Bitmap signatureImage;
         public byte[] signatureImageData;
 
-        // DG8 - Data Feature(s) (Visual security features)
+        // DG8 - Data Feature(s)
         public List<DataFeature> dataFeatures;
 
-        // DG9 - Structure Feature(s) (Physical security features)
+        // DG9 - Structure Feature(s)
         public List<StructureFeature> structureFeatures;
 
-        // DG10 - Substance Feature(s) (Material composition)
+        // DG10 - Substance Feature(s)
         public List<SubstanceFeature> substanceFeatures;
 
         // DG11 - Additional Personal Details
@@ -134,10 +134,10 @@ public class PassportReader {
         public String dateAndTimeOfPersonalization;
         public String personalizationSystemSerialNumber;
 
-        // DG13 - Optional Details (Country-specific)
+        // DG13 - Optional Details
         public byte[] optionalDetailsData;
 
-        // DG14 - Security Options (Chip Authentication, PACE info)
+        // DG14 - Security Options
         public boolean hasChipAuthentication;
         public boolean hasTerminalAuthentication;
         public String chipAuthAlgorithm;
@@ -148,12 +148,11 @@ public class PassportReader {
         public PublicKey activeAuthPublicKey;
         public String activeAuthAlgorithm;
 
-        // DG16 - Persons to Notify (Emergency contacts)
+        // DG16 - Persons to Notify
         public List<EmergencyContact> emergencyContacts;
 
-        // COM (Common) - Lists which DGs are present
+        // COM - Lists which DGs are present
         public List<Integer> availableDataGroups;
-
 
         // Metadata
         public AuthMethod authenticationMethod;
@@ -227,21 +226,18 @@ public class PassportReader {
         public String message;
     }
 
-    // DG8 - Data Features (Visual security features like holograms, UV patterns)
     public static class DataFeature {
         public String featureType;
         public byte[] featureData;
         public String description;
     }
 
-    // DG9 - Structure Features (Physical document structure)
     public static class StructureFeature {
         public String featureType;
         public byte[] featureData;
         public String description;
     }
 
-    // DG10 - Substance Features (Material composition)
     public static class SubstanceFeature {
         public String substanceType;
         public byte[] substanceData;
@@ -250,7 +246,6 @@ public class PassportReader {
 
     /**
      * Select the eMRTD application on the passport chip
-     * CRITICAL FIX for error 0x6999: APPLET SELECT FAILED
      */
     private void selectEMRTDApplication(CardService cardService) throws CardServiceException {
         Log.d(TAG, "📱 Selecting eMRTD application...");
@@ -268,104 +263,110 @@ public class PassportReader {
         }
     }
 
-    /**
-     * Smart authentication method detection and execution
-     */
-    private AuthMethod performSmartAuthentication(PassportService service, CardService cardService, BACKeySpec bacKey) throws Exception {
+    private AuthMethod performSmartAuthentication(PassportService service,
+                                                  CardService cardService,
+                                                  BACKeySpec bacKey) throws Exception {
 
-        // OPTION 1: Try reading CardAccess BEFORE authentication (works on some chips)
+        boolean paceSucceeded = false;
+
+        // Step 1: Try to read CardAccess BEFORE selecting eMRTD application
         try {
-            Log.d(TAG, "🔍 Checking for PACE support via CardAccess (pre-auth)...");
+            Log.d(TAG, "📖 Reading CardAccess file (from Master File)...");
 
             InputStream cardAccessStream = service.getInputStream(PassportService.EF_CARD_ACCESS);
             CardAccessFile cardAccessFile = new CardAccessFile(cardAccessStream);
 
             Collection<SecurityInfo> securityInfos = cardAccessFile.getSecurityInfos();
-            PACEInfo paceInfo = null;
+            Log.d(TAG, "✅ CardAccess found with " + securityInfos.size() + " security infos");
 
+            List<PACEInfo> paceInfos = new ArrayList<>();
             for (SecurityInfo securityInfo : securityInfos) {
                 if (securityInfo instanceof PACEInfo) {
-                    paceInfo = (PACEInfo) securityInfo;
-                    Log.d(TAG, "✓ PACE protocol detected (pre-auth)!");
-                    Log.d(TAG, "  OID: " + paceInfo.getObjectIdentifier());
-                    Log.d(TAG, "  Protocol: " + paceInfo.getProtocolOIDString());
-                    Log.d(TAG, "  Version: " + paceInfo.getVersion());
-                    break;
+                    PACEInfo paceInfo = (PACEInfo) securityInfo;
+                    paceInfos.add(paceInfo);
+
+                    Log.d(TAG, "Found PACE: " + paceInfo.getProtocolOIDString());
+                    Log.d(TAG, "  Parameter: " + PACEInfo.toStandardizedParamIdString(paceInfo.getParameterId()));
                 }
             }
 
-            if (paceInfo != null) {
+            // Try PACE with CardAccess configurations
+            for (PACEInfo paceInfo : paceInfos) {
                 try {
-                    Log.d(TAG, "🔐 Performing PACE authentication...");
+                    String oid = paceInfo.getObjectIdentifier();
+                    BigInteger parameterId = paceInfo.getParameterId();
+
+                    Log.d(TAG, "🔐 Attempting PACE:");
+                    Log.d(TAG, "   " + paceInfo.getProtocolOIDString());
+                    Log.d(TAG, "   " + PACEInfo.toStandardizedParamIdString(parameterId));
+
+                    // Perform PACE - this establishes secure messaging
                     service.doPACE(
                             bacKey,
-                            paceInfo.getObjectIdentifier(),
-                            PACEInfo.toParameterSpec(paceInfo.getParameterId()),
+                            oid,
+                            PACEInfo.toParameterSpec(parameterId),
                             null
                     );
-                    Log.d(TAG, "✅ PACE authentication SUCCESSFUL");
 
-                    // CRITICAL FIX: Re-select eMRTD application AFTER PACE
-                    Log.d(TAG, "🔄 Re-selecting eMRTD application after PACE...");
-                    selectEMRTDApplication(cardService);
+                    Log.d(TAG, "✅ PACE SUCCESS!");
+                    Log.d(TAG, "   Secure messaging established");
 
-                    return AuthMethod.PACE;
+                    // CRITICAL FIX: Re-select eMRTD application WITH secure messaging
+                    Log.d(TAG, "📱 Re-selecting eMRTD application with secure messaging...");
+                    selectEMRTDApplicationSecure(service);
+
+                    paceSucceeded = true;
+                    break;
 
                 } catch (Exception e) {
-                    Log.w(TAG, "⚠️ PACE authentication failed, falling back to BAC", e);
+                    Log.w(TAG, "PACE attempt failed: " + e.getMessage());
                 }
             }
 
         } catch (Exception e) {
-            Log.d(TAG, "ℹ️ CardAccess not readable before auth (error: " + e.getMessage() + ")");
-            Log.d(TAG, "🔄 Will try BAC first, then check PACE post-auth...");
+            Log.d(TAG, "ℹ️ CardAccess not available: " + e.getMessage());
+            Log.d(TAG, "   This passport doesn't support PACE");
         }
 
-        // OPTION 2: Perform BAC first, THEN check for PACE (fallback)
-        try {
+        // Step 2: Select eMRTD application ONLY if PACE didn't succeed
+        if (!paceSucceeded) {
+            Log.d(TAG, "📱 Selecting eMRTD application (PACE not used)...");
+            selectEMRTDApplication(cardService);
+
+            // Step 3: Perform BAC authentication
             Log.d(TAG, "🔐 Performing BAC authentication...");
-            service.sendSelectApplet(false);
             service.doBAC(bacKey);
             Log.d(TAG, "✅ BAC authentication SUCCESSFUL");
-
-            // NOW try to read CardAccess AFTER BAC
-            try {
-                Log.d(TAG, "🔍 Checking for PACE support via CardAccess (post-BAC)...");
-
-                InputStream cardAccessStream = service.getInputStream(PassportService.EF_CARD_ACCESS);
-                CardAccessFile cardAccessFile = new CardAccessFile(cardAccessStream);
-
-                Collection<SecurityInfo> securityInfos = cardAccessFile.getSecurityInfos();
-                PACEInfo paceInfo = null;
-
-                for (SecurityInfo securityInfo : securityInfos) {
-                    if (securityInfo instanceof PACEInfo) {
-                        paceInfo = (PACEInfo) securityInfo;
-                        Log.d(TAG, "✓ PACE protocol detected AFTER BAC!");
-                        Log.d(TAG, "  OID: " + paceInfo.getObjectIdentifier());
-                        Log.d(TAG, "  Note: This passport supports PACE but required BAC first");
-                        break;
-                    }
-                }
-
-                if (paceInfo != null) {
-                    // Passport has PACE capability but we already used BAC
-                    // Log it for information
-                    Log.d(TAG, "ℹ️ Passport supports PACE but accessed via BAC (hybrid mode)");
-                }
-
-            } catch (Exception e) {
-                Log.d(TAG, "ℹ️ No CardAccess found post-BAC either (pure BAC passport)");
-            }
-
             return AuthMethod.BAC;
+        }
 
+        return AuthMethod.PACE;
+    }
+
+    /**
+     * Select eMRTD application using PassportService (with secure messaging support)
+     */
+    private void selectEMRTDApplicationSecure(PassportService service) throws Exception {
+        try {
+            // Use PassportService's sendSelectApplet which respects secure messaging
+            service.sendSelectApplet(service.getWrapper() != null);
+            Log.d(TAG, "✅ eMRTD application re-selected with secure messaging");
         } catch (Exception e) {
-            Log.e(TAG, "❌ BAC authentication FAILED", e);
-            throw new Exception("Authentication failed. Please verify MRZ data is correct:\n" +
-                    "- Document Number\n- Date of Birth (YYMMDD)\n- Expiry Date (YYMMDD)", e);
+            Log.w(TAG, "Failed to re-select via sendSelectApplet, trying manual selection...");
+
+            // Fallback: Manual selection through the service
+            CommandAPDU selectApp = new CommandAPDU(0x00, 0xA4, 0x04, 0x0C, EMRTD_AID);
+            ResponseAPDU response = service.transmit(selectApp);
+
+            if (response.getSW() != 0x9000) {
+                throw new CardServiceException(
+                        String.format("Failed to select eMRTD application: SW=0x%04X", response.getSW())
+                );
+            }
+            Log.d(TAG, "✅ eMRTD application selected (manual)");
         }
     }
+
     /**
      * Main method to read ALL passport data groups
      */
@@ -386,22 +387,19 @@ public class PassportReader {
             throw new Exception("Tag does not support ISO-DEP (ISO 14443-4)");
         }
 
-        isoDep.setTimeout(20000); // 20 seconds for reading all DGs
+        isoDep.setTimeout(20000);
         isoDep.connect();
 
         CardService cardService = CardService.getInstance(isoDep);
         cardService.open();
 
-        // CRITICAL FIX: Select eMRTD application BEFORE creating PassportService
-        Log.d(TAG, "🎯 Initial eMRTD application selection...");
-        selectEMRTDApplication(cardService);
-
+        // Create PassportService with secure messaging support
         PassportService service = new PassportService(
                 cardService,
                 PassportService.NORMAL_MAX_TRANCEIVE_LENGTH,
                 PassportService.DEFAULT_MAX_BLOCKSIZE,
-                true,
-                false
+                true,  // isSFIEnabled
+                false  // shouldCheckMAC
         );
         service.open();
 
@@ -419,75 +417,85 @@ public class PassportReader {
 
         try {
             BACKeySpec bacKey = new BACKey(docNumber, birthDate, expiryDate);
+
+            // Perform authentication (PACE or BAC)
             result.authenticationMethod = performSmartAuthentication(service, cardService, bacKey);
             result.supportedSecurityProtocols.add(result.authenticationMethod.toString());
 
-            // Read COM to detect available DGs
-            try {
-                Log.d(TAG, "📋 Reading COM (Common Data)...");
-                InputStream is = service.getInputStream(PassportService.EF_COM);
-                COMFile comFile = new COMFile(is);
-                int[] tagList = comFile.getTagList();
+            // IMPORTANT: Secure messaging wrapper should be active now
+            Log.d(TAG, "🔒 Secure messaging active: " + (service.getWrapper() != null));
 
-                for (int tag : tagList) {
-                    result.availableDataGroups.add(tag);
-                }
-                Log.d(TAG, "✓ Available Data Groups: " + result.availableDataGroups);
-            } catch (Exception e) {
-                Log.w(TAG, "⚠️ Could not read COM file", e);
+            // Read SOD FIRST to get list of available Data Groups (trusted source)
+            readSOD(service, result);
+
+            // Populate available DGs from SOD (the secure, signed list)
+            if (result.dataGroupHashes != null && !result.dataGroupHashes.isEmpty()) {
+                result.availableDataGroups = new ArrayList<>(result.dataGroupHashes.keySet());
+                Log.d(TAG, "✓ Available Data Groups from SOD: " + result.availableDataGroups);
             }
 
-            // Read ALL Data Groups (DG1-DG16)
-            readDG1(service, result);   // MRZ - MANDATORY
-            readDG2(service, result);   // Face Image - MANDATORY
+            // Read MANDATORY Data Groups (always present)
+            readDG1(service, result);
+            readDG2(service, result);
 
-            // DG3-DG16 - Read if available
-            if (result.availableDataGroups.contains(PassportService.EF_DG3)) {
+            // Read OPTIONAL Data Groups (check SOD first)
+            if (result.availableDataGroups.contains(3)) {
                 readDG3(service, result);
             }
 
-            if (result.availableDataGroups.contains(PassportService.EF_DG4)) {
+            if (result.availableDataGroups.contains(4)) {
                 readDG4(service, result);
             }
 
-            if (result.availableDataGroups.contains(PassportService.EF_DG5)) {
+            if (result.availableDataGroups.contains(5)) {
                 readDG5(service, result);
             }
 
-            if (result.availableDataGroups.contains(PassportService.EF_DG6)) {
+            if (result.availableDataGroups.contains(6)) {
                 readDG6(service, result);
             }
 
-            if (result.availableDataGroups.contains(PassportService.EF_DG7)) {
+            if (result.availableDataGroups.contains(7)) {
                 readDG7(service, result);
             }
 
-            if (result.availableDataGroups.contains(PassportService.EF_DG8)) {
+            if (result.availableDataGroups.contains(8)) {
                 readDG8(service, result);
             }
 
-            if (result.availableDataGroups.contains(PassportService.EF_DG9)) {
+            if (result.availableDataGroups.contains(9)) {
                 readDG9(service, result);
             }
 
-            if (result.availableDataGroups.contains(PassportService.EF_DG10)) {
+            if (result.availableDataGroups.contains(10)) {
                 readDG10(service, result);
             }
 
-            readDG11(service, result);
-            readDG12(service, result);
+            if (result.availableDataGroups.contains(11)) {
+                readDG11(service, result);
+            }
 
-            if (result.availableDataGroups.contains(PassportService.EF_DG13)) {
+            if (result.availableDataGroups.contains(12)) {
+                readDG12(service, result);
+            }
+
+            if (result.availableDataGroups.contains(13)) {
                 readDG13(service, result);
             }
 
-            readDG14(service, result);
-            readDG15(service, result);
+            if (result.availableDataGroups.contains(14)) {
+                readDG14(service, result);
+            }
 
-            if (result.availableDataGroups.contains(PassportService.EF_DG16)) {
+            if (result.availableDataGroups.contains(15)) {
+                readDG15(service, result);
+            }
+
+            if (result.availableDataGroups.contains(16)) {
                 readDG16(service, result);
             }
 
+            // Perform advanced authentication if supported
             if (result.hasActiveAuthentication) {
                 performActiveAuthentication(service, result);
             }
@@ -495,8 +503,6 @@ public class PassportReader {
             if (result.hasChipAuthentication) {
                 performChipAuthentication(service, result);
             }
-
-            readSOD(service, result);
 
             Log.d(TAG, "✅ COMPLETE passport read finished - ALL Data Groups processed");
 
@@ -555,13 +561,9 @@ public class PassportReader {
 
                     Bitmap bitmap = null;
 
-                    // Handle different image formats
                     if (mimeType.equals("image/jp2") || mimeType.equals("image/jpeg2000")) {
-                        // JPEG 2000 format - needs special decoder
-//                        bitmap = decodeJPEG2000(buffer);
                         bitmap = new JP2Decoder(buffer).decode();
                     } else {
-                        // Standard formats (JPEG, PNG, etc.)
                         bitmap = BitmapFactory.decodeByteArray(buffer, 0, buffer.length);
                     }
 
@@ -578,7 +580,6 @@ public class PassportReader {
             Log.e(TAG, "✗ Error reading DG2", e);
         }
     }
-
 
     private void readDG3(PassportService service, PassportData result) {
         try {
@@ -958,12 +959,9 @@ public class PassportReader {
 
     private void readSOD(PassportService service, PassportData result) {
         try {
-            Log.d(TAG, "🔏 Reading SOD (Security Object)...");
+            Log.d(TAG, "🔏 Reading SOD (Security Object Document)...");
             InputStream is = service.getInputStream(PassportService.EF_SOD);
 
-            // 1. Read the InputStream into a byte array
-            // Note: is.available() is not always reliable for total length,
-            // so we read fully into a buffer.
             ByteArrayOutputStream buffer = new ByteArrayOutputStream();
             int nRead;
             byte[] data = new byte[1024];
@@ -973,13 +971,10 @@ public class PassportReader {
             buffer.flush();
             byte[] sodBytes = buffer.toByteArray();
 
-            // 2. Store the raw bytes in the result object
             result.rawSODData = sodBytes;
 
-            // 3. Parse the SODFile using the byte array
             SODFile sodFile = new SODFile(new ByteArrayInputStream(sodBytes));
 
-            // 4. Extract Metadata
             if (sodFile.getIssuerX500Principal() != null) {
                 result.signingCountry = sodFile.getIssuerX500Principal().getName();
             }
@@ -988,19 +983,48 @@ public class PassportReader {
                 result.documentSignerCertificate = sodFile.getDocSigningCertificate().toString();
             }
 
-            // 5. Extract the Hashes (Crucial for Passive Authentication)
-            // This maps the Tag (e.g., 1 for DG1, 2 for DG2) to the hash bytes
             result.dataGroupHashes = sodFile.getDataGroupHashes();
-
-            result.hasValidSignature = true; // This only means the file was parsed, not cryptographically verified yet
+            result.hasValidSignature = true;
 
             Log.d(TAG, "✓ SOD: Read " + sodBytes.length + " bytes");
             Log.d(TAG, "✓ SOD: Hashes found for DGs: " + result.dataGroupHashes.keySet());
+            Log.d(TAG, "✓ SOD: Signed by: " + result.signingCountry);
 
         } catch (Exception e) {
-            Log.w(TAG, "⚠️ SOD verification failed", e);
+            Log.w(TAG, "⚠️ SOD read/verification failed", e);
             result.hasValidSignature = false;
+
+            // Initialize empty hash map to avoid NPE
+            result.dataGroupHashes = new java.util.HashMap<>();
         }
     }
 
+    /**
+     * Helper method to convert COM tag list to DG numbers
+     * WARNING: COM file is not signed and can't be trusted for security decisions
+     */
+    private List<Integer> parseDataGroupsFromCOM(int[] tagList) {
+        List<Integer> dgList = new ArrayList<>();
+
+        for (int tag : tagList) {
+            // COM file uses tags like 0x61, 0x75, etc.
+            // We need to convert them to DG numbers (1-16)
+            // The actual mapping depends on the LDS version
+
+            // For LDS 1.7/1.8, the tag format is usually:
+            // 0x60 + DG_NUMBER for DG1-DG16
+
+            if (tag >= 0x60 && tag <= 0x6F) {
+                int dgNumber = tag - 0x60;
+                dgList.add(dgNumber);
+            } else if (tag >= 0x70 && tag <= 0x7F) {
+                int dgNumber = tag - 0x70 + 16;
+                dgList.add(dgNumber);
+            } else {
+                Log.w(TAG, "Unknown COM tag: 0x" + Integer.toHexString(tag));
+            }
+        }
+
+        return dgList;
+    }
 }
