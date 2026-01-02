@@ -20,6 +20,8 @@ import com.google.android.material.textfield.TextInputEditText;
 public class MainActivity extends AppCompatActivity {
 
     private static final int REQUEST_CODE_CAMERA = 100;
+    private static final char[] HEX_ARRAY = "0123456789ABCDEF".toCharArray();
+
     private NfcAdapter nfcAdapter;
 
     private TextInputEditText edDocNum, edBirthDate, edExpiryDate;
@@ -181,7 +183,7 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
 
-            tvStatus.setText("Status: Reading passport... DO NOT MOVE!");
+            tvStatus.setText("Status: Reading passport... DO NOT MOVE");
             tvResult.setText("");
             imageFace.setImageBitmap(null);
 
@@ -212,7 +214,39 @@ public class MainActivity extends AppCompatActivity {
         result.append("═══════════════════════════════\n");
         result.append("📘 PASSPORT INFORMATION\n");
         result.append("═══════════════════════════════\n\n");
+        // --- SOD SECTION START ---
+        result.append("───────────────────────────────\n");
+        result.append("🔐 SECURITY OBJECT (SOD)\n");
+        result.append("───────────────────────────────\n");
 
+        if (data.rawSODData != null) {
+            result.append("Select Status: ").append(data.hasValidSignature ? "Present" : "Error").append("\n");
+            result.append("Signer (Issuer): ").append(data.signingCountry != null ? data.signingCountry : "Unknown").append("\n");
+            result.append("Raw Size: ").append(data.rawSODData.length).append(" bytes\n");
+
+            // Display the hashes found in the SOD
+            if (data.dataGroupHashes != null && !data.dataGroupHashes.isEmpty()) {
+                result.append("\nIntegrity Hashes (DG Hashes):\n");
+                // Sort keys for cleaner display (DG1, DG2, etc.)
+                java.util.TreeMap<Integer, byte[]> sortedHashes = new java.util.TreeMap<>(data.dataGroupHashes);
+
+                for (java.util.Map.Entry<Integer, byte[]> entry : sortedHashes.entrySet()) {
+                    int dgNum = entry.getKey();
+                    String hashHex = bytesToHex(entry.getValue());
+                    // Truncate hash for display if it's too long
+                    if (hashHex.length() > 20) {
+                        hashHex = hashHex.substring(0, 20) + "...";
+                    }
+                    result.append("  • DG").append(dgNum).append(": ").append(hashHex).append("\n");
+                }
+            } else {
+                result.append("No Data Group hashes found.\n");
+            }
+        } else {
+            result.append("⚠️ SOD Data was not read.\n");
+        }
+        result.append("\n");
+        result.append("───────────────────────────────\n");
         result.append("📄 BASIC INFORMATION (DG1)\n");
         result.append("───────────────────────────────\n");
         result.append("Document Type: ").append(data.documentCode).append("\n");
@@ -341,5 +375,14 @@ public class MainActivity extends AppCompatActivity {
         int fullYear = (yy > 50) ? (1900 + yy) : (2000 + yy);
 
         return day + "/" + month + "/" + fullYear;
+    }
+    public static String bytesToHex(byte[] bytes) {
+        char[] hexChars = new char[bytes.length * 2];
+        for (int j = 0; j < bytes.length; j++) {
+            int v = bytes[j] & 0xFF;
+            hexChars[j * 2] = HEX_ARRAY[v >>> 4];
+            hexChars[j * 2 + 1] = HEX_ARRAY[v & 0x0F];
+        }
+        return new String(hexChars);
     }
 }

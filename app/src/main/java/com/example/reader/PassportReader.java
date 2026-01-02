@@ -27,6 +27,7 @@ import org.jmrtd.lds.icao.*;
 import org.jmrtd.lds.iso19794.*;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.InputStream;
 import java.security.PublicKey;
@@ -53,6 +54,15 @@ public class PassportReader {
 
     // Comprehensive Result container for ALL Data Groups
     public static class PassportData {
+
+        // SOD - Security Object Document Details
+        public boolean hasValidSignature;
+        public String signingCountry;
+        public String documentSignerCertificate;
+
+        // NEW FIELDS FOR SOD
+        public byte[] rawSODData;                 // The raw binary of the SOD file
+        public java.util.Map<Integer, byte[]> dataGroupHashes; // Hashes of DG1, DG2, etc. stored in SOD
 
         // DG1 - MRZ (Machine Readable Zone) - MANDATORY
         public String documentCode;
@@ -144,10 +154,6 @@ public class PassportReader {
         // COM (Common) - Lists which DGs are present
         public List<Integer> availableDataGroups;
 
-        // SOD (Security Object Document) - Digital signature
-        public boolean hasValidSignature;
-        public String signingCountry;
-        public String documentSignerCertificate;
 
         // Metadata
         public AuthMethod authenticationMethod;
@@ -954,12 +960,43 @@ public class PassportReader {
         try {
             Log.d(TAG, "🔏 Reading SOD (Security Object)...");
             InputStream is = service.getInputStream(PassportService.EF_SOD);
-            SODFile sodFile = new SODFile(is);
 
-            result.signingCountry = sodFile.getIssuerX500Principal().getName();
-            result.hasValidSignature = true;
+            // 1. Read the InputStream into a byte array
+            // Note: is.available() is not always reliable for total length,
+            // so we read fully into a buffer.
+            ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+            int nRead;
+            byte[] data = new byte[1024];
+            while ((nRead = is.read(data, 0, data.length)) != -1) {
+                buffer.write(data, 0, nRead);
+            }
+            buffer.flush();
+            byte[] sodBytes = buffer.toByteArray();
 
-            Log.d(TAG, "✓ SOD: Signed by " + result.signingCountry);
+            // 2. Store the raw bytes in the result object
+            result.rawSODData = sodBytes;
+
+            // 3. Parse the SODFile using the byte array
+            SODFile sodFile = new SODFile(new ByteArrayInputStream(sodBytes));
+
+            // 4. Extract Metadata
+            if (sodFile.getIssuerX500Principal() != null) {
+                result.signingCountry = sodFile.getIssuerX500Principal().getName();
+            }
+
+            if (sodFile.getDocSigningCertificate() != null) {
+                result.documentSignerCertificate = sodFile.getDocSigningCertificate().toString();
+            }
+
+            // 5. Extract the Hashes (Crucial for Passive Authentication)
+            // This maps the Tag (e.g., 1 for DG1, 2 for DG2) to the hash bytes
+            result.dataGroupHashes = sodFile.getDataGroupHashes();
+
+            result.hasValidSignature = true; // This only means the file was parsed, not cryptographically verified yet
+
+            Log.d(TAG, "✓ SOD: Read " + sodBytes.length + " bytes");
+            Log.d(TAG, "✓ SOD: Hashes found for DGs: " + result.dataGroupHashes.keySet());
+
         } catch (Exception e) {
             Log.w(TAG, "⚠️ SOD verification failed", e);
             result.hasValidSignature = false;
