@@ -20,29 +20,46 @@ import androidx.camera.view.PreviewView;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
+import com.example.reader.mrz.EepMrzParser;
+import com.example.reader.mrz.MrzParser;
+import com.example.reader.mrz.Td3PassportParser;
 import com.google.mlkit.vision.common.InputImage;
 import com.google.mlkit.vision.text.Text;
 import com.google.mlkit.vision.text.TextRecognition;
 import com.google.mlkit.vision.text.TextRecognizer;
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 public class CameraActivity extends AppCompatActivity {
 
     private static final String TAG = "CameraActivity";
     private static final int CAMERA_PERMISSION_REQUEST = 10;
-    private static final long PROCESS_INTERVAL = 500; // Process every 500ms
+    private static final long PROCESS_INTERVAL = 500;
+
+    // Intent extras keys
+    public static final String EXTRA_DOC_NUM = "DOC_NUM";
+    public static final String EXTRA_DOB = "DOB";
+    public static final String EXTRA_EXPIRY = "EXPIRY";
+    public static final String EXTRA_MRZ_LINES = "MRZ_LINES";
+    public static final String EXTRA_DOC_TYPE = "DOC_TYPE";
+
+    // Document type constants
+    public static final String DOC_TYPE_PASSPORT = "PASSPORT";
+    public static final String DOC_TYPE_EEP = "EEP";
+    public static final String DOC_TYPE_UNKNOWN = "UNKNOWN";
 
     private PreviewView previewView;
     private ExecutorService cameraExecutor;
     private TextRecognizer recognizer;
     private long lastProcessTime = 0;
     private boolean isProcessing = false;
+
+    private List<MrzParser> mrzParsers;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -53,7 +70,8 @@ public class CameraActivity extends AppCompatActivity {
         cameraExecutor = Executors.newSingleThreadExecutor();
         recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
 
-        // Request Camera Permission
+        initializeParsers();
+
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
                 == PackageManager.PERMISSION_GRANTED) {
             startCamera();
@@ -62,6 +80,12 @@ public class CameraActivity extends AppCompatActivity {
                     new String[]{Manifest.permission.CAMERA},
                     CAMERA_PERMISSION_REQUEST);
         }
+    }
+
+    private void initializeParsers() {
+        mrzParsers = new ArrayList<>();
+        mrzParsers.add(new EepMrzParser());
+        mrzParsers.add(new Td3PassportParser());
     }
 
     @Override
@@ -86,13 +110,11 @@ public class CameraActivity extends AppCompatActivity {
             try {
                 ProcessCameraProvider cameraProvider = cameraProviderFuture.get();
 
-                // Preview
                 Preview preview = new Preview.Builder().build();
                 preview.setSurfaceProvider(previewView.getSurfaceProvider());
 
-                // Image Analysis (The OCR part)
                 ImageAnalysis imageAnalysis = new ImageAnalysis.Builder()
-                        .setTargetResolution(new Size(1280, 720)) // Higher resolution for better OCR
+                        .setTargetResolution(new Size(1280, 720))
                         .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                         .build();
 
@@ -110,7 +132,6 @@ public class CameraActivity extends AppCompatActivity {
 
     @SuppressLint("UnsafeOptInUsageError")
     private void analyzeImage(@NonNull ImageProxy imageProxy) {
-        // Throttle processing to avoid overwhelming the system
         long currentTime = System.currentTimeMillis();
 
         if (isProcessing || currentTime - lastProcessTime < PROCESS_INTERVAL) {
@@ -128,9 +149,7 @@ public class CameraActivity extends AppCompatActivity {
             );
 
             recognizer.process(image)
-                    .addOnSuccessListener(visionText -> {
-                        processText(visionText);
-                    })
+                    .addOnSuccessListener(this::processText)
                     .addOnFailureListener(e -> {
                         Log.e(TAG, "Text recognition failed", e);
                         isProcessing = false;
@@ -150,200 +169,58 @@ public class CameraActivity extends AppCompatActivity {
         String[] lines = fullText.split("\n");
 
         for (String line : lines) {
-            // Remove spaces and convert to uppercase
             line = line.replace(" ", "").toUpperCase();
 
-            // Check for lines between 43-45 chars (allow some OCR variance)
-            if (line.length() >= 43 && line.length() <= 45) {
-                // Check if it matches MRZ pattern
-                if (looksLikeMrzLine2(line)) {
-                    try {
-                        parseMrzLine2(line);
-                        return; // Exit after successful parse
-                    } catch (Exception e) {
-                        Log.d(TAG, "Failed to parse potential MRZ line: " + line, e);
+            for (MrzParser parser : mrzParsers) {
+                if (parser.canParse(line)) {
+                    Intent result = parser.parse(line);
+
+                    if (result != null) {
+                        String docType = parser.getDocumentType();
+                        int mrzLines = getMrzLineCount(parser);
+                        String docTypeCode = getDocTypeCode(parser);
+
+                        // Add MRZ line count and document type to the result
+                        result.putExtra(EXTRA_MRZ_LINES, mrzLines);
+                        result.putExtra(EXTRA_DOC_TYPE, docTypeCode);
+
+                        Log.d(TAG, "Successfully parsed " + docType + " with " + mrzLines + " MRZ lines");
+
+                        runOnUiThread(() -> {
+                            setResult(RESULT_OK, result);
+                            Toast.makeText(this, "✅ " + docType + " Scanned!", Toast.LENGTH_SHORT).show();
+                            finish();
+                        });
+                        return;
                     }
                 }
             }
         }
     }
 
-    private boolean looksLikeMrzLine2(String line) {
-        // Line 2 typically starts with alphanumeric (doc number)
-        // and contains date patterns (6 consecutive digits)
-
-        // Check for date patterns (YYMMDD appears twice)
-        Pattern datePattern = Pattern.compile("\\d{6}");
-        Matcher matcher = datePattern.matcher(line);
-
-        int dateCount = 0;
-        while (matcher.find()) {
-            dateCount++;
+    /**
+     * Determine MRZ line count based on parser type
+     */
+    private int getMrzLineCount(MrzParser parser) {
+        if (parser instanceof Td3PassportParser) {
+            return 2; // TD3 passport has 2 lines (but often referred to as "3-line" including visual zone)
+            // If your TD3 parser actually reads 3 lines, change this to 3
+        } else if (parser instanceof EepMrzParser) {
+            return 1; // EEP has 1 MRZ line
         }
-
-        // Should have at least 2 date patterns (DOB and Expiry)
-        return dateCount >= 2;
+        return 0;
     }
 
-    private String cleanMrzCharacters(String text) {
-        return text
-                .replace("O", "0")  // Letter O to zero
-                .replace("Q", "0")
-                .replace("D", "0")
-                .replace("I", "1")  // Letter I to one
-                .replace("l", "1")  // Lowercase L to one
-                .replace("Z", "2")
-                .replace("S", "5")
-                .replace("B", "8")
-                .replace("<", "")   // Remove filler characters
-                .toUpperCase();
-    }
-
-    private boolean isValidDate(String date) {
-        if (date.length() != 6) return false;
-
-        try {
-            int year = Integer.parseInt(date.substring(0, 2));
-            int month = Integer.parseInt(date.substring(2, 4));
-            int day = Integer.parseInt(date.substring(4, 6));
-
-            // Basic date validation
-            if (month < 1 || month > 12) return false;
-            if (day < 1 || day > 31) return false;
-
-            // More strict validation for months with fewer days
-            if ((month == 4 || month == 6 || month == 9 || month == 11) && day > 30) {
-                return false;
-            }
-            if (month == 2 && day > 29) {
-                return false;
-            }
-
-            return true;
-        } catch (NumberFormatException e) {
-            return false;
+    /**
+     * Get document type code based on parser type
+     */
+    private String getDocTypeCode(MrzParser parser) {
+        if (parser instanceof Td3PassportParser) {
+            return DOC_TYPE_PASSPORT;
+        } else if (parser instanceof EepMrzParser) {
+            return DOC_TYPE_EEP;
         }
-    }
-
-    private boolean validateCheckDigit(String data, char checkDigit) {
-        int[] weights = {7, 3, 1};
-        int sum = 0;
-
-        for (int i = 0; i < data.length(); i++) {
-            char c = data.charAt(i);
-            int value;
-
-            if (c == '<') {
-                value = 0;
-            } else if (Character.isDigit(c)) {
-                value = c - '0';
-            } else if (Character.isLetter(c)) {
-                value = c - 'A' + 10;
-            } else {
-                return false; // Invalid character
-            }
-
-            sum += value * weights[i % 3];
-        }
-
-        int calculatedCheck = sum % 10;
-
-        // Handle check digit
-        int providedCheck;
-        if (checkDigit == '<') {
-            providedCheck = 0;
-        } else if (Character.isDigit(checkDigit)) {
-            providedCheck = checkDigit - '0';
-        } else {
-            return false;
-        }
-
-        return calculatedCheck == providedCheck;
-    }
-
-    private void parseMrzLine2(String line) {
-        // Ensure line is exactly 44 characters
-        if (line.length() < 44) {
-            Log.d(TAG, "Line too short: " + line.length());
-            return;
-        }
-
-        // Truncate if slightly longer (OCR might add extra char)
-        line = line.substring(0, 44);
-
-        // TD3 Format (Standard Passport) Line 2 Structure:
-        // Chars 0-9:   Document Number
-        // Char 9:      Check digit for document number
-        // Chars 10-12: Nationality (3 letters)
-        // Chars 13-19: Date of Birth (YYMMDD)
-        // Char 19:     Check digit for DOB
-        // Char 20:     Sex (M/F/<)
-        // Chars 21-27: Expiry Date (YYMMDD)
-        // Char 27:     Check digit for expiry
-
-        try {
-            String docNum = line.substring(0, 9);
-            char docNumCheck = line.charAt(9);
-            String nationality = line.substring(10, 13);
-            String dob = line.substring(13, 19);
-            char dobCheck = line.charAt(19);
-            char sex = line.charAt(20);
-            String expiry = line.substring(21, 27);
-            char expiryCheck = line.charAt(27);
-
-            Log.d(TAG, "Parsing MRZ - DocNum: " + docNum + ", DOB: " + dob + ", Expiry: " + expiry);
-
-            // Validate check digits
-            if (!validateCheckDigit(docNum, docNumCheck)) {
-                Log.d(TAG, "Invalid document number check digit");
-                return;
-            }
-
-            if (!validateCheckDigit(dob, dobCheck)) {
-                Log.d(TAG, "Invalid DOB check digit");
-                return;
-            }
-
-            if (!validateCheckDigit(expiry, expiryCheck)) {
-                Log.d(TAG, "Invalid expiry check digit");
-                return;
-            }
-
-            // Clean the extracted data
-            docNum = cleanMrzCharacters(docNum);
-            dob = cleanMrzCharacters(dob);
-            expiry = cleanMrzCharacters(expiry);
-
-            // Validate dates
-            if (!isValidDate(dob)) {
-                Log.d(TAG, "Invalid DOB date: " + dob);
-                return;
-            }
-
-            if (!isValidDate(expiry)) {
-                Log.d(TAG, "Invalid expiry date: " + expiry);
-                return;
-            }
-
-            // Success! Return data to MainActivity
-            Log.d(TAG, "Successfully parsed MRZ!");
-            String finalDocNum = docNum;
-            String finalDob = dob;
-            String finalExpiry = expiry;
-            runOnUiThread(() -> {
-                Intent resultIntent = new Intent();
-                resultIntent.putExtra("DOC_NUM", finalDocNum);
-                resultIntent.putExtra("DOB", finalDob);
-                resultIntent.putExtra("EXPIRY", finalExpiry);
-                resultIntent.putExtra("NATIONALITY", nationality);
-                resultIntent.putExtra("SEX", String.valueOf(sex));
-                setResult(RESULT_OK, resultIntent);
-                finish();
-            });
-
-        } catch (Exception e) {
-            Log.e(TAG, "Error parsing MRZ line", e);
-        }
+        return DOC_TYPE_UNKNOWN;
     }
 
     @Override

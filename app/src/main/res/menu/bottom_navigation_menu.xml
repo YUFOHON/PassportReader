@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/nav_eppt"
+        android:icon="@drawable/ic_passport"
+        android:title="ePPT" />
+
+    <item
+        android:id="@+id/nav_eppp"
+        android:icon="@drawable/ic_document"
+        android:title="ePPP" />
+
+    <item
+        android:id="@+id/nav_smart_detection"
+        android:icon="@drawable/ic_detection"
+        android:title="Smart Detection" />
+</menu>

@@ -533,7 +533,7 @@ public class PassportReader {
             result.optionalData1 = mrzInfo.getOptionalData1();
             result.optionalData2 = mrzInfo.getOptionalData2();
 
-            Log.d(TAG, "✓ DG1: " + result.firstName + " " + result.lastName + " (" + result.nationality + ")");
+            Log.d(TAG, "✓ mrzInfo: " + mrzInfo);
         } catch (Exception e) {
             Log.e(TAG, "✗ Error reading DG1", e);
         }
@@ -823,6 +823,7 @@ public class PassportReader {
             result.proofOfCitizenship = dg11.getProofOfCitizenship();
             result.otherValidTravelDocNumbers = dg11.getOtherValidTDNumbers();
             result.custodyInformation = dg11.getCustodyInformation();
+            Log.d(TAG, "result: " + result);
 
             Log.d(TAG, "✓ DG11: Extended personal data");
         } catch (Exception e) {
