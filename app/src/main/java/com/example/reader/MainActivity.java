@@ -17,7 +17,7 @@ import com.google.android.material.bottomnavigation.BottomNavigationView;
 public class MainActivity extends AppCompatActivity {
 
     private static final int REQUEST_CODE_CAMERA = 100;
-    private EpptFragment epptFragment;
+    SmartDetectionFragment smartDetectionFragment;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -30,44 +30,12 @@ public class MainActivity extends AppCompatActivity {
         }
 
         // Initialize fragments
-        epptFragment = new EpptFragment();
-
-        // Setup Bottom Navigation
-        BottomNavigationView bottomNav = findViewById(R.id.bottom_navigation);
-        bottomNav.setOnItemSelectedListener(item -> {
-            Fragment selectedFragment = null;
-
-            int itemId = item.getItemId();
-            if (itemId == R.id.nav_eppt) {
-                selectedFragment = epptFragment;
-                if (getSupportActionBar() != null) {
-                    getSupportActionBar().setTitle("📘 ePPT Reader");
-                }
-            } else if (itemId == R.id.nav_eppp) {
-                selectedFragment = new EeepFragment();
-                if (getSupportActionBar() != null) {
-                    getSupportActionBar().setTitle("📄 ePPP Reader");
-                }
-            } else if (itemId == R.id.nav_smart_detection) {
-                selectedFragment = new SmartDetectionFragment();
-                if (getSupportActionBar() != null) {
-                    getSupportActionBar().setTitle("🔍 Smart Detection");
-                }
-            }
-
-            if (selectedFragment != null) {
-                getSupportFragmentManager().beginTransaction()
-                        .replace(R.id.fragment_container, selectedFragment)
-                        .commit();
-            }
-
-            return true;
-        });
+        smartDetectionFragment = new SmartDetectionFragment();
 
         // Load default fragment (ePPT)
         if (savedInstanceState == null) {
             getSupportFragmentManager().beginTransaction()
-                    .replace(R.id.fragment_container, epptFragment)
+                    .replace(R.id.fragment_container, smartDetectionFragment)
                     .commit();
         }
     }
@@ -77,8 +45,8 @@ public class MainActivity extends AppCompatActivity {
         super.onActivityResult(requestCode, resultCode, data);
 
         // Forward the result to the ePPT fragment
-        if (epptFragment != null) {
-            epptFragment.onActivityResult(requestCode, resultCode, data);
+        if (smartDetectionFragment != null) {
+            smartDetectionFragment.onActivityResult(requestCode, resultCode, data);
         }
     }
 
@@ -95,14 +63,6 @@ public class MainActivity extends AppCompatActivity {
             ((SmartDetectionFragment) currentFragment).handleNfcIntent(intent);
         }
 
-        if (currentFragment instanceof EpptFragment) {
-            Log.d("@@>>", "handle eppt nfc intent");
-            ((EpptFragment) currentFragment).handleNfcIntent(intent);
-        }
-        if (currentFragment instanceof EeepFragment) {
-            Log.d("@@>>", "handle eppp nfc intent");
-            ((EeepFragment) currentFragment).handleNfcIntent(intent);
 
-        }
     }
 }

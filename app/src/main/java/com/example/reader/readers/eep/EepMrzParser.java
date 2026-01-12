@@ -1,16 +1,17 @@
 package com.example.reader.readers.eep;
 
 import android.util.Log;
-import java.util.Arrays;
-import java.util.List;
 
 /**
  * Parser for Chinese Exit-Entry Permit MRZ (Machine Readable Zone)
  * Handles the 3-line, 30-character format used by 往来港澳通行证 (2014 version)
+ *
+ * This parser follows field-length based extraction instead of position-based,
+ * matching the iOS implementation logic.
  */
 public class EepMrzParser {
 
-    private static final String TAG = "@@>> EepMrzParser";
+    private static final String TAG = "EepMrzParser";
 
     private final MrzCheckDigitValidator checkDigitValidator;
     private final ChineseNameDecoder nameDecoder;
@@ -34,17 +35,17 @@ public class EepMrzParser {
         public String firstName;
         public String chineseName;
         public String gender;
-        public String endorsementNumber;
+        public String placeOfBirth;
+        public boolean isValid;
         public boolean checksumValid;
-        public List<String> validationWarnings;
 
         @Override
         public String toString() {
             return String.format(
                     "ParseResult{docCode='%s', cardNum='%s', dob='%s', expiry='%s', " +
-                            "name='%s %s', chinese='%s', valid=%b}",
+                            "name='%s %s', chinese='%s', pob='%s', valid=%b}",
                     documentCode, cardNumber, dateOfBirth, dateOfExpiry,
-                    lastName, firstName, chineseName, checksumValid
+                    lastName, firstName, chineseName, placeOfBirth, isValid
             );
         }
     }
@@ -56,141 +57,206 @@ public class EepMrzParser {
         if (mrz == null || mrz.length() < 2) {
             return false;
         }
-        String docCode = mrz.substring(0, 2).toUpperCase();
-        Log.d(TAG, "docCode : " + docCode);
 
-        return EepConstants.DOC_CODE_HK_MACAU.equals(docCode)
-                || EepConstants.DOC_CODE_TAIWAN.equals(docCode);
+        String cleaned = mrz.replaceAll("[\\s\\n\\r]", "");
+        if (cleaned.length() < 2) {
+            return false;
+        }
+
+        String docCode = cleaned.substring(0, 2).toUpperCase();
+        Log.d(TAG, "Document code: " + docCode);
+
+        return "CS".equals(docCode) || "CD".equals(docCode);
     }
 
     /**
-     * Parse the complete MRZ string
+     * Parse the complete MRZ string using field-length based extraction
+     * Following iOS logic exactly
      */
     public ParseResult parse(String mrz) {
         ParseResult result = new ParseResult();
 
-        String cleaned = normalizeMrz(mrz);
-        if (cleaned.length() < EepConstants.MRZ_TOTAL_LENGTH) {
-            Log.w(TAG, "MRZ too short: " + cleaned.length());
+        String normalized = normalizeMrz(mrz);
+        if (normalized.length() < 90) {
+            Log.w(TAG, "MRZ too short: " + normalized.length());
+            result.isValid = false;
             return result;
         }
 
-        String line1 = cleaned.substring(0, 30);
-        String line2 = cleaned.substring(30, 60);
-        String line3 = cleaned.substring(60, 90);
+        Log.d(TAG, "Parsing normalized MRZ (90 chars):");
+        Log.d(TAG, "  Full: " + normalized);
 
-        Log.d(TAG, "Parsing MRZ lines:");
-        Log.d(TAG, "  Line1: " + line1);
-        Log.d(TAG, "  Line2: " + line2);
-        Log.d(TAG, "  Line3: " + line3);
-
-        parseLine1(line1, result);
-        parseLine2(line2, result);
-        parseLine3(line3, result);
+        // Parse using field-length based extraction (iOS style)
+        parseFieldBased(normalized, result);
 
         return result;
     }
 
+    /**
+     * Field-length based parsing matching iOS implementation
+     */
+    private void parseFieldBased(String mrz, ParseResult result) {
+        int idx = 0;
+
+        // Skip: doc code (1) + filler (1)
+        String docCode = substring(mrz, idx, EepConstants.DOC_CODE).trim();
+        result.documentCode = docCode.isEmpty() ? "C" : docCode;
+        idx += EepConstants.DOC_CODE_WITH_FILLER;
+
+        // Extract: document number (9)
+        result.cardNumber = substring(mrz, idx, EepConstants.DOCUMENT_NUMBER).trim();
+        Log.d(TAG, "Card number: " + result.cardNumber);
+
+        // Verify check digit
+        char cardCheckDigit = mrz.charAt(idx + EepConstants.DOCUMENT_NUMBER);
+        if (!checkDigitValidator.verify(result.cardNumber, cardCheckDigit)) {
+            Log.w(TAG, "Card number check digit failed");
+            result.checksumValid = false;
+        }
+        idx += EepConstants.DOCUMENT_NUMBER_BLOCK;
+
+        // Extract: expiry date (skip filler, read 6 digits)
+        String expiry = substring(mrz, idx + EepConstants.FILLER, EepConstants.DATE).trim();
+        result.dateOfExpiry = expiry;
+        Log.d(TAG, "Expiry date: " + result.dateOfExpiry);
+
+        char expiryCheckDigit = mrz.charAt(idx + EepConstants.FILLER + EepConstants.DATE);
+        if (!checkDigitValidator.verify(expiry, expiryCheckDigit)) {
+            Log.w(TAG, "Expiry date check digit failed");
+            result.checksumValid = false;
+        }
+        idx += EepConstants.EXPIRY_BLOCK;
+
+        // Extract: date of birth (6) with century calculation
+        String dob = substring(mrz, idx, EepConstants.DATE).trim();
+        result.dateOfBirth = calculateDOB(dob);
+        Log.d(TAG, "Date of birth: " + result.dateOfBirth);
+
+        char dobCheckDigit = mrz.charAt(idx + EepConstants.DATE);
+        if (!checkDigitValidator.verify(dob, dobCheckDigit)) {
+            Log.w(TAG, "DOB check digit failed");
+            result.checksumValid = false;
+        }
+        idx += EepConstants.DOB_BLOCK;
+
+        // Skip: overall check digit
+        idx += EepConstants.OVERALL_CHECK;
+
+        // Extract: Chinese name (12 chars, GBK encoded)
+        String chineseEncoded = substring(mrz, idx, EepConstants.CHINESE_NAME);
+        result.chineseName = nameDecoder.decode(chineseEncoded);
+        Log.d(TAG, "Chinese name: " + result.chineseName);
+        idx += EepConstants.CHINESE_NAME;
+
+        // Extract: English name (18 chars)
+        String englishName = substring(mrz, idx, EepConstants.ENGLISH_NAME);
+        parseEnglishName(englishName, result);
+        Log.d(TAG, "English name: " + result.firstName + " " + result.lastName);
+        idx += EepConstants.ENGLISH_NAME;
+
+        // Extract: Gender (1)
+        result.gender = substring(mrz, idx, EepConstants.GENDER).trim();
+        if (result.gender.isEmpty()) {
+            result.gender = "UNKNOWN";
+        }
+        Log.d(TAG, "Gender: " + result.gender);
+        idx += EepConstants.GENDER;
+
+        // Skip: obsolete fields (5)
+        idx += EepConstants.OBSOLETE_BLOCK;
+
+        // Skip: thumbnail flags (2)
+        idx += EepConstants.THUMBNAIL_BLOCK;
+
+        // Extract: Place of birth (3)
+        String pob = substring(mrz, idx, EepConstants.PLACE_OF_BIRTH)
+                .trim()
+                .replace("<", " ")
+                .trim();
+        result.placeOfBirth = pob.isEmpty() ? null : pob;
+        Log.d(TAG, "Place of birth: " + result.placeOfBirth);
+
+        // Set fixed values
+        result.issuingState = EepConstants.ISSUING_COUNTRY_CHINA;
+        result.nationality = EepConstants.ISSUING_COUNTRY_CHINA;
+        result.isValid = true;
+    }
+
+    /**
+     * Calculate full date of birth from YYMMDD format
+     * Matches iOS calculateDOB logic
+     */
+    private String calculateDOB(String yymmdd) {
+        if (yymmdd == null || yymmdd.length() != 6) {
+            return yymmdd;
+        }
+
+        try {
+            java.text.SimpleDateFormat formatter = new java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US);
+            String today = formatter.format(new java.util.Date());
+            String century = today.substring(0, 2);
+
+            String fullDate = century + yymmdd;
+
+            // If birth date is in future, subtract 1 from century
+            if (fullDate.compareTo(today) > 0) {
+                int cent = Integer.parseInt(century);
+                fullDate = String.valueOf(cent - 1) + yymmdd;
+            }
+
+            return fullDate;
+        } catch (Exception e) {
+            Log.w(TAG, "Error calculating DOB: " + e.getMessage());
+            return yymmdd;
+        }
+    }
+
+    /**
+     * Parse English/Pinyin name field
+     * Matches iOS parseEnglishName logic
+     */
+    private void parseEnglishName(String field, ParseResult result) {
+        String cleaned = field.replaceAll("^<+|<+$", "");
+        String[] parts = cleaned.split("<+");
+
+        // Filter empty parts
+        java.util.List<String> nonEmpty = new java.util.ArrayList<>();
+        for (String part : parts) {
+            if (!part.isEmpty()) {
+                nonEmpty.add(part);
+            }
+        }
+
+        if (nonEmpty.size() >= 2) {
+            result.lastName = nonEmpty.get(0);
+            result.firstName = nonEmpty.get(1);
+        } else if (nonEmpty.size() == 1) {
+            result.lastName = nonEmpty.get(0);
+            result.firstName = null;
+        } else {
+            result.lastName = null;
+            result.firstName = null;
+        }
+    }
+
+    /**
+     * Normalize MRZ to exactly 90 characters
+     */
     private String normalizeMrz(String mrz) {
-        String cleaned = mrz.replaceAll("\\s+", "");
-        while (cleaned.length() < EepConstants.MRZ_TOTAL_LENGTH) {
+        String cleaned = mrz.replaceAll("[\\s\\n\\r]", "");
+        while (cleaned.length() < 90) {
             cleaned += "<";
         }
         return cleaned;
     }
 
-    private void parseLine1(String line, ParseResult result) {
-        // Document code
-        result.documentCode = line.substring(
-                EepConstants.L1_DOC_CODE_START,
-                EepConstants.L1_DOC_CODE_END
-        );
-
-        // Card number
-        result.cardNumber = line.substring(
-                EepConstants.L1_CARD_NUMBER_START,
-                EepConstants.L1_CARD_NUMBER_END
-        );
-
-        // Validate card number checksum
-        char cardCheck = line.charAt(EepConstants.L1_CARD_CHECK_DIGIT);
-        if (!checkDigitValidator.verify(result.cardNumber, cardCheck)) {
-            Log.w(TAG, "Card number check digit failed");
+    /**
+     * Extract substring safely
+     */
+    private String substring(String str, int start, int length) {
+        if (start < 0 || start + length > str.length()) {
+            return "";
         }
-
-        // Expiry date
-        result.dateOfExpiry = line.substring(
-                EepConstants.L1_EXPIRY_START,
-                EepConstants.L1_EXPIRY_END
-        );
-
-        char expiryCheck = line.charAt(EepConstants.L1_EXPIRY_CHECK_DIGIT);
-        if (!checkDigitValidator.verify(result.dateOfExpiry, expiryCheck)) {
-            Log.w(TAG, "Expiry date check digit failed");
-        }
-
-        // Date of birth
-        result.dateOfBirth = line.substring(
-                EepConstants.L1_DOB_START,
-                EepConstants.L1_DOB_END
-        );
-
-        char dobCheck = line.charAt(EepConstants.L1_DOB_CHECK_DIGIT);
-        if (!checkDigitValidator.verify(result.dateOfBirth, dobCheck)) {
-            Log.w(TAG, "DOB check digit failed");
-        }
-
-        // Set nationality (always China for EEP)
-        result.issuingState = EepConstants.ISSUING_COUNTRY_CHINA;
-        result.nationality = EepConstants.ISSUING_COUNTRY_CHINA;
-        result.gender = "UNKNOWN";  // Not in MRZ, comes from DG11
-    }
-
-    private void parseLine2(String line, ParseResult result) {
-        int separatorPos = line.indexOf("<<");
-
-        if (separatorPos <= 0) {
-            Log.w(TAG, "No << separator in Line 2");
-            result.firstName = line.replace("<", " ").trim();
-            return;
-        }
-
-        String beforeSeparator = line.substring(0, separatorPos);
-        String afterSeparator = line.substring(separatorPos + 2);
-
-        // Extract encoded Chinese name and pinyin surname
-        NameExtractionResult nameResult = extractNames(beforeSeparator);
-
-        result.lastName = nameResult.surname;
-        result.firstName = afterSeparator.replace("<", " ").trim();
-        result.chineseName = nameDecoder.decode(nameResult.encodedChinese);
-
-        Log.d(TAG, String.format("Parsed names - Surname: '%s', Given: '%s', Chinese: '%s'",
-                result.lastName, result.firstName, result.chineseName));
-    }
-
-    private void parseLine3(String line, ParseResult result) {
-        result.endorsementNumber = line.replace("<", "").trim();
-        Log.d(TAG, "Endorsement number: " + result.endorsementNumber);
-    }
-
-    private static class NameExtractionResult {
-        String encodedChinese;
-        String surname;
-    }
-
-    private NameExtractionResult extractNames(String beforeSeparator) {
-        NameExtractionResult result = new NameExtractionResult();
-
-        if (beforeSeparator.length() > EepConstants.ENCODED_CHINESE_NAME_LENGTH) {
-            result.encodedChinese = beforeSeparator.substring(0, EepConstants.ENCODED_CHINESE_NAME_LENGTH);
-            result.surname = beforeSeparator.substring(EepConstants.ENCODED_CHINESE_NAME_LENGTH)
-                    .replace("<", "").trim();
-        } else {
-            result.encodedChinese = "";
-            result.surname = beforeSeparator.replace("<", "").trim();
-        }
-
-        return result;
+        return str.substring(start, start + length);
     }
 }

@@ -11,41 +11,6 @@
         android:orientation="vertical"
         android:padding="16dp">
 
-        <!-- Header Card -->
-        <com.google.android.material.card.MaterialCardView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="16dp"
-            app:cardCornerRadius="12dp"
-            app:cardElevation="4dp"
-            app:strokeColor="@color/purple_500"
-            app:strokeWidth="2dp">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="16dp">
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="🔍 Smart Detection Mode"
-                    android:textSize="18sp"
-                    android:textStyle="bold"
-                    android:textColor="@color/purple_700" />
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:text="Automatically detects document type from MRZ scan:\n• 2-3 line MRZ → Passport\n• 1 line MRZ → HK/Macao Travel Permit"
-                    android:textSize="14sp"
-                    android:textColor="@android:color/darker_gray" />
-
-            </LinearLayout>
-
-        </com.google.android.material.card.MaterialCardView>
 
         <!-- Detected Type Display -->
         <TextView

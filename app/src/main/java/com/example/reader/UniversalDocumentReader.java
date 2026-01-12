@@ -130,9 +130,11 @@ public class UniversalDocumentReader {
             try {
                 Log.d(TAG, "Starting document read with: " + reader.getReaderName());
 
-                notifyProgress("Connecting to chip...", 10);
+                IDocumentReader.ProgressCallback progressCallback = (message, progress) -> {
+                    notifyProgress(message, progress);
+                };
 
-                DocumentData result = reader.readDocument(tag, authData);
+                DocumentData result = reader.readDocument(tag, authData, progressCallback);
 
                 Log.d(TAG, "Document read completed: " + result.getSummary());
 

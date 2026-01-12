@@ -3,65 +3,68 @@
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:background="#000000">
+    android:layout_height="match_parent">
 
     <androidx.camera.view.PreviewView
         android:id="@+id/viewFinder"
+        app:scaleType="fillCenter"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
+        android:layout_height="match_parent" />
 
-    <!-- Overlay to guide user where to position MRZ -->
-    <View
-        android:id="@+id/overlayTop"
+    <!-- MRZ Guidance Overlay -->
+    <com.example.reader.MRZGuidanceOverlay
+        android:id="@+id/guidanceOverlay"
         android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:background="#99000000"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintBottom_toTopOf="@id/mrzGuideBox"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
+        android:layout_height="match_parent" />
 
-    <!-- MRZ Guide Box -->
-    <View
-        android:id="@+id/mrzGuideBox"
+    <!-- Instruction Text -->
+    <TextView
+        android:id="@+id/instructionLabel"
         android:layout_width="0dp"
-        android:layout_height="120dp"
-        android:layout_marginStart="16dp"
-        android:layout_marginEnd="16dp"
-        android:background="@drawable/mrz_guide_border"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
+        android:layout_height="wrap_content"
+        android:text="Position document within the frame"
+        android:textColor="@android:color/white"
+        android:textSize="16sp"
+        android:gravity="center"
+        android:padding="12dp"
+        android:background="#80000000"
         app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintVertical_bias="0.6" />
-
-    <View
-        android:id="@+id/overlayBottom"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:background="#99000000"
-        app:layout_constraintTop_toBottomOf="@id/mrzGuideBox"
-        app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="40dp"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp" />
 
     <TextView
-        android:id="@+id/instructionText"
+        android:id="@+id/documentTypeLabel"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Align MRZ within the box"
-        android:textColor="#FFFFFF"
-        android:textSize="16sp"
+        android:text="Detecting document type..."
+        android:textColor="@android:color/white"
+        android:textSize="14sp"
         android:padding="8dp"
-        android:background="#CC000000"
-        android:layout_marginBottom="16dp"
-        app:layout_constraintBottom_toTopOf="@id/mrzGuideBox"
+        android:background="@android:color/holo_blue_dark"
+        app:layout_constraintTop_toBottomOf="@id/instructionLabel"
+        app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent" />
+        android:layout_marginTop="16dp" />
+
+    <TextView
+        android:id="@+id/resultLabel"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:text="Scanning for MRZ...\n掃描機讀碼中..."
+        android:textColor="@android:color/white"
+        android:textSize="14sp"
+        android:gravity="center"
+        android:padding="16dp"
+        android:background="#B0000000"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginBottom="50dp"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp"
+        android:fontFamily="monospace" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>

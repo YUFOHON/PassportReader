@@ -25,6 +25,7 @@ import com.example.reader.models.DocumentData;
 import com.example.reader.models.EepData;
 import com.example.reader.models.PassportData;
 import com.example.reader.readers.DocumentAuthData;
+import com.example.reader.utils.Constants;
 import com.google.android.material.textfield.TextInputEditText;
 
 import java.util.ArrayList;
@@ -32,6 +33,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.TreeSet;
 
 public class SmartDetectionFragment extends Fragment {
 
@@ -286,17 +288,17 @@ public class SmartDetectionFragment extends Fragment {
         super.onActivityResult(requestCode, resultCode, data);
 
         if (requestCode == REQUEST_CODE_CAMERA && resultCode == Activity.RESULT_OK && data != null) {
-            String docNum = data.getStringExtra(CameraActivity.EXTRA_DOC_NUM);
+            String docNum = data.getStringExtra(Constants.EXTRA_DOC_NUM);
             if (docNum == null) docNum = data.getStringExtra("DOC_NUM");
 
-            String dob = data.getStringExtra(CameraActivity.EXTRA_DOB);
+            String dob = data.getStringExtra(Constants.EXTRA_DOB);
             if (dob == null) dob = data.getStringExtra("DOB");
 
-            String expiry = data.getStringExtra(CameraActivity.EXTRA_EXPIRY);
+            String expiry = data.getStringExtra(Constants.EXTRA_EXPIRY);
             if (expiry == null) expiry = data.getStringExtra("EXPIRY");
 
-            mrzLineCount = data.getIntExtra(CameraActivity.EXTRA_MRZ_LINES, 0);
-            String docTypeCode = data.getStringExtra(CameraActivity.EXTRA_DOC_TYPE);
+            mrzLineCount = data.getIntExtra(Constants.EXTRA_MRZ_LINES, 0);
+            String docTypeCode = data.getStringExtra(Constants.EXTRA_DOC_TYPE);
 
             // Determine document type based on MRZ lines or doc type code
             detectedDocumentType = determineDocumentType(mrzLineCount, docTypeCode);
@@ -345,31 +347,47 @@ public class SmartDetectionFragment extends Fragment {
         // First try using the explicit doc type code
         if (docTypeCode != null) {
             switch (docTypeCode) {
-                case CameraActivity.DOC_TYPE_PASSPORT:
-                    Log.d(TAG, "Detected PASSPORT from doc type code");
+                case Constants.DOC_TYPE_TD3:
+                    Log.d(TAG, "Detected TD3/PASSPORT from doc type code");
                     return DocumentData.DocumentType.PASSPORT;
-                case CameraActivity.DOC_TYPE_EEP:
+
+                case Constants.DOC_TYPE_EEP_CHINA:
                     Log.d(TAG, "Detected EEP from doc type code");
                     return DocumentData.DocumentType.EEEP;
+
+                case Constants.DOC_TYPE_TD1:
+                    Log.d(TAG, "Detected TD1/ID CARD from doc type code");
+                    return DocumentData.DocumentType.PASSPORT;
+
+                case Constants.DOC_TYPE_TD2:
+                    Log.d(TAG, "Detected TD2 from doc type code");
+                    return DocumentData.DocumentType.PASSPORT;
+
+                case Constants.DOC_TYPE_MRVA:
+                case Constants.DOC_TYPE_MRVB:
+                    Log.d(TAG, "Detected VISA from doc type code");
+                    return DocumentData.DocumentType.PASSPORT;
+
+                default:
+                    Log.d(TAG, "Unknown doc type code: " + docTypeCode);
+                    break;
             }
         }
 
-        // Fall back to MRZ line count
-        // TD3 Passport: 2 MRZ lines (machine readable zone)
-        // TD1 ID Card: 3 MRZ lines
-        // EEP: 1 MRZ line
-        if (mrzLines >= 2) {
-            Log.d(TAG, "Detected PASSPORT from MRZ line count: " + mrzLines);
-            return DocumentData.DocumentType.PASSPORT;
-        } else if (mrzLines == 1) {
-            Log.d(TAG, "Detected EEP from MRZ line count: " + mrzLines);
-            return DocumentData.DocumentType.EEEP;
+        // Fallback: use MRZ line count
+        Log.d(TAG, "Determining document type from MRZ line count: " + mrzLines);
+        switch (mrzLines) {
+            case 1:
+                return DocumentData.DocumentType.EEEP;
+            case 2:
+                return DocumentData.DocumentType.PASSPORT;
+            case 3:
+                return DocumentData.DocumentType.ID_CARD;
+            default:
+                Log.w(TAG, "Unknown MRZ line count: " + mrzLines + ", defaulting to PASSPORT");
+                return DocumentData.DocumentType.PASSPORT;
         }
-
-        Log.w(TAG, "Could not determine document type, mrzLines=" + mrzLines + ", docTypeCode=" + docTypeCode);
-        return null;
     }
-
     private void updateDetectedTypeDisplay() {
         if (tvDetectedType == null) return;
 
@@ -433,17 +451,20 @@ public class SmartDetectionFragment extends Fragment {
     private void displayPassportData(PassportData data) {
         tvStatus.setText("✅ Passport Read Complete!");
         StringBuilder result = new StringBuilder();
+
         result.append("═══════════════════════════════\n");
         result.append("📘 PASSPORT INFORMATION\n");
         result.append("═══════════════════════════════\n\n");
 
+        // ========================================
         // SOD Section
+        // ========================================
         result.append("───────────────────────────────\n");
         result.append("🔐 SECURITY OBJECT (SOD)\n");
         result.append("───────────────────────────────\n");
 
         if (data.rawSODData != null) {
-            result.append("Status: ").append(data.hasValidSignature ? "Present ✓" : "Present").append("\n");
+            result.append("Status: ").append(data.hasValidSignature ? "Valid ✓" : "Present").append("\n");
             result.append("Signer: ").append(data.signingCountry != null ? data.signingCountry : "Unknown").append("\n");
             result.append("Size: ").append(data.rawSODData.length).append(" bytes\n");
 
@@ -458,60 +479,459 @@ public class SmartDetectionFragment extends Fragment {
                     result.append("  DG").append(entry.getKey()).append(": ").append(hashHex).append("\n");
                 }
             }
+
+            if (data.documentSignerCertificate != null) {
+                result.append("\nCertificate Info:\n");
+                String certInfo = data.documentSignerCertificate;
+                if (certInfo.length() > 100) {
+                    certInfo = certInfo.substring(0, 100) + "...";
+                }
+                result.append(certInfo).append("\n");
+            }
         } else {
             result.append("⚠️ SOD not available\n");
         }
         result.append("\n");
 
-        // Basic Information
+        // ========================================
+        // DG1 - Basic Information (MRZ)
+        // ========================================
         result.append("───────────────────────────────\n");
-        result.append("📄 BASIC INFORMATION (DG1)\n");
+        result.append("📄 BASIC INFORMATION (DG1 - MRZ)\n");
         result.append("───────────────────────────────\n");
-        result.append("Document Type: ").append(data.documentCode).append("\n");
-        result.append("Document Number: ").append(data.documentNumber).append("\n");
-        result.append("Name: ").append(data.firstName).append(" ").append(data.lastName).append("\n");
-        result.append("Nationality: ").append(data.nationality).append("\n");
-        result.append("Issuing Country: ").append(data.issuingCountry).append("\n");
-        result.append("Gender: ").append(data.gender).append("\n");
-        result.append("Date of Birth: ").append(formatDate(data.dateOfBirth)).append("\n");
-        result.append("Date of Expiry: ").append(formatDate(data.dateOfExpiry)).append("\n");
+        appendIfNotNull(result, "Document Type: ", data.documentCode);
+        appendIfNotNull(result, "Document Number: ", data.documentNumber);
+        appendIfNotNull(result, "First Name: ", data.firstName);
+        appendIfNotNull(result, "Last Name: ", data.lastName);
+        appendIfNotNull(result, "Nationality: ", data.nationality);
+        appendIfNotNull(result, "Issuing Country: ", data.issuingCountry);
+        appendIfNotNull(result, "Gender: ", data.gender);
+        if (data.dateOfBirth != null) {
+            result.append("Date of Birth: ").append(formatDate(data.dateOfBirth)).append("\n");
+        }
+        if (data.dateOfExpiry != null) {
+            result.append("Date of Expiry: ").append(formatDate(data.dateOfExpiry)).append("\n");
+        }
+        appendIfNotNull(result, "Optional Data 1: ", data.optionalData1);
+        appendIfNotNull(result, "Optional Data 2: ", data.optionalData2);
         result.append("\n");
 
-        // Face Image
+        // ========================================
+        // DG2 - Facial Image
+        // ========================================
+        result.append("───────────────────────────────\n");
         result.append("📸 FACIAL IMAGE (DG2)\n");
         result.append("───────────────────────────────\n");
-        if (!data.faceImages.isEmpty()) {
-            result.append("Images: ").append(data.faceImages.size()).append(" photo(s)\n");
+        if (data.faceImages != null && !data.faceImages.isEmpty()) {
+            result.append("Images Found: ").append(data.faceImages.size()).append(" photo(s)\n");
+            for (int i = 0; i < data.faceImageMimeTypes.size(); i++) {
+                result.append("  Image ").append(i + 1).append(": ").append(data.faceImageMimeTypes.get(i)).append("\n");
+            }
+            // Display first image
             imageFace.setImageBitmap(data.faceImages.get(0));
+
+            Bitmap firstImage = data.faceImages.get(0);
+            result.append("  Size: ").append(firstImage.getWidth()).append("x").append(firstImage.getHeight()).append(" pixels\n");
         } else {
-            result.append("No face image available\n");
+            result.append("⚠️ No face image available\n");
         }
         result.append("\n");
 
-        // Security Information
-        result.append("🔐 SECURITY INFORMATION\n");
+        // ========================================
+        // DG3 - Fingerprints
+        // ========================================
+        if (data.availableDataGroups.contains(3)) {
+            result.append("───────────────────────────────\n");
+            result.append("👆 FINGERPRINTS (DG3)\n");
+            result.append("───────────────────────────────\n");
+
+            if (data.hasFingerprintData && data.fingerprints != null && !data.fingerprints.isEmpty()) {
+                result.append("Fingerprints Found: ").append(data.fingerprints.size()).append("\n");
+                for (int i = 0; i < data.fingerprints.size(); i++) {
+                    PassportData.FingerprintData fp = data.fingerprints.get(i);
+                    result.append("  Fingerprint ").append(i + 1).append(":\n");
+                    result.append("    Position: ").append(fp.fingerPosition).append("\n");
+                    result.append("    Format: ").append(fp.imageFormat).append("\n");
+                    result.append("    Size: ").append(fp.width).append("x").append(fp.height).append(" pixels\n");
+                }
+            } else {
+                result.append("⚠️ No fingerprint data (EAC protected or not available)\n");
+            }
+            result.append("\n");
+        }
+
+        // ========================================
+        // DG4 - Iris Scans
+        // ========================================
+        if (data.availableDataGroups.contains(4)) {
+            result.append("───────────────────────────────\n");
+            result.append("👁️ IRIS SCANS (DG4)\n");
+            result.append("───────────────────────────────\n");
+
+            if (data.hasIrisData && data.irisScans != null && !data.irisScans.isEmpty()) {
+                result.append("Iris Scans Found: ").append(data.irisScans.size()).append("\n");
+                for (int i = 0; i < data.irisScans.size(); i++) {
+                    PassportData.IrisData iris = data.irisScans.get(i);
+                    result.append("  Scan ").append(i + 1).append(":\n");
+                    result.append("    Eye: ").append(iris.eyeLabel).append("\n");
+                    result.append("    Format: ").append(iris.imageFormat).append("\n");
+                }
+            } else {
+                result.append("⚠️ No iris data (EAC protected or not available)\n");
+            }
+            result.append("\n");
+        }
+
+        // ========================================
+        // DG5 - Displayed Portrait
+        // ========================================
+        if (data.availableDataGroups.contains(5)) {
+            result.append("───────────────────────────────\n");
+            result.append("🖼️ DISPLAYED PORTRAIT (DG5)\n");
+            result.append("───────────────────────────────\n");
+
+            if (data.displayedPortrait != null) {
+                result.append("Portrait Image: Present ✓\n");
+                result.append("Size: ").append(data.displayedPortrait.getWidth()).append("x")
+                        .append(data.displayedPortrait.getHeight()).append(" pixels\n");
+            } else {
+                result.append("⚠️ No portrait image\n");
+            }
+            result.append("\n");
+        }
+
+        // ========================================
+        // DG6 - Reserved
+        // ========================================
+        if (data.availableDataGroups.contains(6)) {
+            result.append("───────────────────────────────\n");
+            result.append("📦 RESERVED DATA (DG6)\n");
+            result.append("───────────────────────────────\n");
+
+            if (data.dg6Data != null && data.dg6Data.length > 0) {
+                result.append("Data Size: ").append(data.dg6Data.length).append(" bytes\n");
+                result.append("(Country-specific data)\n");
+            } else {
+                result.append("⚠️ No DG6 data\n");
+            }
+            result.append("\n");
+        }
+
+        // ========================================
+        // DG7 - Signature Image
+        // ========================================
+        if (data.availableDataGroups.contains(7)) {
+            result.append("───────────────────────────────\n");
+            result.append("✍️ SIGNATURE (DG7)\n");
+            result.append("───────────────────────────────\n");
+
+            if (data.signatureImage != null) {
+                result.append("Signature Image: Present ✓\n");
+                result.append("Size: ").append(data.signatureImage.getWidth()).append("x")
+                        .append(data.signatureImage.getHeight()).append(" pixels\n");
+            } else if (data.signatureImageData != null) {
+                result.append("Signature Data: ").append(data.signatureImageData.length).append(" bytes\n");
+            } else {
+                result.append("⚠️ No signature image\n");
+            }
+            result.append("\n");
+        }
+
+        // ========================================
+        // DG8 - Data Features (Security)
+        // ========================================
+        if (data.availableDataGroups.contains(8)) {
+            result.append("───────────────────────────────\n");
+            result.append("🔍 DATA FEATURES (DG8)\n");
+            result.append("───────────────────────────────\n");
+
+            if (data.dataFeatures != null && !data.dataFeatures.isEmpty()) {
+                for (PassportData.DataFeature feature : data.dataFeatures) {
+                    result.append("Type: ").append(feature.featureType).append("\n");
+                    result.append("Description: ").append(feature.description).append("\n");
+                    result.append("Data Size: ").append(feature.featureData != null ? feature.featureData.length : 0).append(" bytes\n");
+                }
+            } else {
+                result.append("⚠️ No data features\n");
+            }
+            result.append("\n");
+        }
+
+        // ========================================
+        // DG9 - Structure Features
+        // ========================================
+        if (data.availableDataGroups.contains(9)) {
+            result.append("───────────────────────────────\n");
+            result.append("🏗️ STRUCTURE FEATURES (DG9)\n");
+            result.append("───────────────────────────────\n");
+
+            if (data.structureFeatures != null && !data.structureFeatures.isEmpty()) {
+                for (PassportData.StructureFeature feature : data.structureFeatures) {
+                    result.append("Type: ").append(feature.featureType).append("\n");
+                    result.append("Description: ").append(feature.description).append("\n");
+                    result.append("Data Size: ").append(feature.featureData != null ? feature.featureData.length : 0).append(" bytes\n");
+                }
+            } else {
+                result.append("⚠️ No structure features\n");
+            }
+            result.append("\n");
+        }
+
+        // ========================================
+        // DG10 - Substance Features
+        // ========================================
+        if (data.availableDataGroups.contains(10)) {
+            result.append("───────────────────────────────\n");
+            result.append("⚗️ SUBSTANCE FEATURES (DG10)\n");
+            result.append("───────────────────────────────\n");
+
+            if (data.substanceFeatures != null && !data.substanceFeatures.isEmpty()) {
+                for (PassportData.SubstanceFeature feature : data.substanceFeatures) {
+                    result.append("Type: ").append(feature.substanceType).append("\n");
+                    result.append("Description: ").append(feature.description).append("\n");
+                    result.append("Data Size: ").append(feature.substanceData != null ? feature.substanceData.length : 0).append(" bytes\n");
+                }
+            } else {
+                result.append("⚠️ No substance features\n");
+            }
+            result.append("\n");
+        }
+
+        // ========================================
+        // DG11 - Additional Personal Details
+        // ========================================
+        if (data.availableDataGroups.contains(11)) {
+            result.append("───────────────────────────────\n");
+            result.append("ℹ️ ADDITIONAL PERSONAL DETAILS (DG11)\n");
+            result.append("───────────────────────────────\n");
+
+            appendIfNotNull(result, "Full Name: ", data.fullName);
+
+            if (data.otherNames != null && !data.otherNames.isEmpty()) {
+                result.append("Other Names:\n");
+                for (String name : data.otherNames) {
+                    result.append("  • ").append(name).append("\n");
+                }
+            }
+
+            appendIfNotNull(result, "Personal Number: ", data.personalNumber);
+            appendIfNotNull(result, "Place of Birth: ", data.placeOfBirth);
+            appendIfNotNull(result, "Full Date of Birth: ", data.dateOfBirth_Full);
+
+            if (data.address != null && !data.address.isEmpty()) {
+                result.append("Address:\n");
+                for (String addressLine : data.address) {
+                    result.append("  ").append(addressLine).append("\n");
+                }
+            }
+
+            appendIfNotNull(result, "Telephone: ", data.telephone);
+            appendIfNotNull(result, "Profession: ", data.profession);
+            appendIfNotNull(result, "Title: ", data.title);
+            appendIfNotNull(result, "Personal Summary: ", data.personalSummary);
+
+            if (data.proofOfCitizenship != null && data.proofOfCitizenship.length > 0) {
+                result.append("Proof of Citizenship: ").append(data.proofOfCitizenship.length).append(" bytes\n");
+            }
+
+            if (data.otherValidTravelDocNumbers != null && !data.otherValidTravelDocNumbers.isEmpty()) {
+                result.append("Other Travel Documents:\n");
+                for (String doc : data.otherValidTravelDocNumbers) {
+                    result.append("  • ").append(doc).append("\n");
+                }
+            }
+
+            appendIfNotNull(result, "Custody Info: ", data.custodyInformation);
+            result.append("\n");
+        }
+
+        // ========================================
+        // DG12 - Additional Document Details
+        // ========================================
+        if (data.availableDataGroups.contains(12)) {
+            result.append("───────────────────────────────\n");
+            result.append("📋 ADDITIONAL DOCUMENT DETAILS (DG12)\n");
+            result.append("───────────────────────────────\n");
+
+            appendIfNotNull(result, "Issuing Authority: ", data.issuingAuthority);
+            appendIfNotNull(result, "Date of Issue: ", data.dateOfIssue);
+
+            if (data.namesOfOtherPersons != null && !data.namesOfOtherPersons.isEmpty()) {
+                result.append("Names of Other Persons:\n");
+                for (String person : data.namesOfOtherPersons) {
+                    result.append("  • ").append(person).append("\n");
+                }
+            }
+
+            appendIfNotNull(result, "Endorsements & Observations: ", data.endorsementsAndObservations);
+            appendIfNotNull(result, "Tax/Exit Requirements: ", data.taxOrExitRequirements);
+
+            if (data.imageOfFront != null && data.imageOfFront.length > 0) {
+                result.append("Front Image: ").append(data.imageOfFront.length).append(" bytes\n");
+            }
+
+            if (data.imageOfRear != null && data.imageOfRear.length > 0) {
+                result.append("Rear Image: ").append(data.imageOfRear.length).append(" bytes\n");
+            }
+
+            appendIfNotNull(result, "Personalization Date/Time: ", data.dateAndTimeOfPersonalization);
+            appendIfNotNull(result, "Personalization System S/N: ", data.personalizationSystemSerialNumber);
+            result.append("\n");
+        }
+
+        // ========================================
+        // DG13 - Optional Details
+        // ========================================
+        if (data.availableDataGroups.contains(13)) {
+            result.append("───────────────────────────────\n");
+            result.append("📦 OPTIONAL DETAILS (DG13)\n");
+            result.append("───────────────────────────────\n");
+
+            if (data.optionalDetailsData != null && data.optionalDetailsData.length > 0) {
+                result.append("Data Size: ").append(data.optionalDetailsData.length).append(" bytes\n");
+            } else {
+                result.append("⚠️ No optional details\n");
+            }
+            result.append("\n");
+        }
+
+        // ========================================
+        // DG14 - Security Options
+        // ========================================
+        if (data.availableDataGroups.contains(14)) {
+            result.append("───────────────────────────────\n");
+            result.append("🔐 SECURITY OPTIONS (DG14)\n");
+            result.append("───────────────────────────────\n");
+
+            result.append("Chip Authentication: ").append(data.hasChipAuthentication ? "Supported ✓" : "Not supported").append("\n");
+            if (data.chipAuthAlgorithm != null) {
+                result.append("  Algorithm: ").append(data.chipAuthAlgorithm).append("\n");
+            }
+
+            result.append("Terminal Authentication: ").append(data.hasTerminalAuthentication ? "Supported ✓" : "Not supported").append("\n");
+
+            if (data.supportedSecurityProtocols != null && !data.supportedSecurityProtocols.isEmpty()) {
+                result.append("Security Protocols:\n");
+                for (String protocol : data.supportedSecurityProtocols) {
+                    result.append("  • ").append(protocol).append("\n");
+                }
+            }
+            result.append("\n");
+        }
+
+        // ========================================
+        // DG15 - Active Authentication
+        // ========================================
+        if (data.availableDataGroups.contains(15)) {
+            result.append("───────────────────────────────\n");
+            result.append("🔑 ACTIVE AUTHENTICATION (DG15)\n");
+            result.append("───────────────────────────────\n");
+
+            result.append("Active Authentication: ").append(data.hasActiveAuthentication ? "Supported ✓" : "Not supported").append("\n");
+
+            if (data.activeAuthPublicKey != null) {
+                result.append("Public Key Algorithm: ").append(data.activeAuthAlgorithm != null ? data.activeAuthAlgorithm : "Unknown").append("\n");
+                result.append("Public Key Format: ").append(data.activeAuthPublicKey.getFormat()).append("\n");
+            }
+
+            result.append("AA Performed: ").append(data.activeAuthenticationPerformed ? "Yes ✓" : "No").append("\n");
+            result.append("\n");
+        }
+
+        // ========================================
+        // DG16 - Emergency Contacts
+        // ========================================
+        if (data.availableDataGroups.contains(16)) {
+            result.append("───────────────────────────────\n");
+            result.append("🆘 EMERGENCY CONTACTS (DG16)\n");
+            result.append("───────────────────────────────\n");
+
+            if (data.emergencyContacts != null && !data.emergencyContacts.isEmpty()) {
+                for (int i = 0; i < data.emergencyContacts.size(); i++) {
+                    PassportData.EmergencyContact contact = data.emergencyContacts.get(i);
+                    result.append("Contact ").append(i + 1).append(":\n");
+                    appendIfNotNull(result, "  Name: ", contact.name);
+                    appendIfNotNull(result, "  Telephone: ", contact.telephone);
+                    appendIfNotNull(result, "  Address: ", contact.address);
+                    appendIfNotNull(result, "  Message: ", contact.message);
+                }
+            } else {
+                result.append("⚠️ No emergency contacts\n");
+            }
+            result.append("\n");
+        }
+
+        // ========================================
+        // Security Summary
+        // ========================================
         result.append("───────────────────────────────\n");
-        result.append("Authentication: ").append(data.authenticationMethod).append("\n");
-        result.append("Chip Auth: ").append(data.hasChipAuthentication ? "Yes ✓" : "No").append("\n");
-        result.append("Active Auth: ").append(data.hasActiveAuthentication ? "Yes ✓" : "No").append("\n");
+        result.append("🔐 SECURITY SUMMARY\n");
+        result.append("───────────────────────────────\n");
+        appendIfNotNull(result, "Authentication Method: ", data.authenticationMethod);
+        result.append("Chip Authentication: ").append(data.hasChipAuthentication ? "Yes ✓" : "No").append("\n");
+        result.append("  Performed: ").append(data.chipAuthenticationPerformed ? "Yes ✓" : "No").append("\n");
+        result.append("Active Authentication: ").append(data.hasActiveAuthentication ? "Yes ✓" : "No").append("\n");
+        result.append("  Performed: ").append(data.activeAuthenticationPerformed ? "Yes ✓" : "No").append("\n");
         result.append("Digital Signature: ").append(data.hasValidSignature ? "Valid ✓" : "Not verified").append("\n");
         result.append("\n");
 
+        // ========================================
         // Available Data Groups
-        result.append("📊 DATA GROUPS PRESENT\n");
+        // ========================================
         result.append("───────────────────────────────\n");
-        result.append("Available: ");
-        for (Integer dg : data.availableDataGroups) {
-            result.append("DG").append(dg).append(" ");
+        result.append("📊 DATA GROUPS SUMMARY\n");
+        result.append("───────────────────────────────\n");
+        result.append("Available DGs: ");
+        if (data.availableDataGroups != null && !data.availableDataGroups.isEmpty()) {
+            TreeSet<Integer> sortedDGs = new TreeSet<>(data.availableDataGroups);
+            for (Integer dg : sortedDGs) {
+                result.append("DG").append(dg).append(" ");
+            }
+        } else {
+            result.append("None");
         }
         result.append("\n\n");
 
+        // ========================================
+        // Metadata
+        // ========================================
+        appendIfNotNull(result, "Passport Type: ", data.passportType);
+
         result.append("═══════════════════════════════\n");
         result.append("✅ Read completed successfully\n");
+        result.append("Total Data Groups: ").append(data.availableDataGroups != null ? data.availableDataGroups.size() : 0).append("\n");
         result.append("═══════════════════════════════");
 
         tvResult.setText(result.toString());
     }
+
+    // Helper method to append non-null values
+    private void appendIfNotNull(StringBuilder sb, String label, String value) {
+        if (value != null && !value.isEmpty()) {
+            sb.append(label).append(value).append("\n");
+        }
+    }
+
+    // Helper method to format dates from YYMMDD to readable format
+    private String formatDate(String yymmdd) {
+        if (yymmdd == null || yymmdd.length() != 6) {
+            return yymmdd;
+        }
+        try {
+            String yy = yymmdd.substring(0, 2);
+            String mm = yymmdd.substring(2, 4);
+            String dd = yymmdd.substring(4, 6);
+
+            // Convert YY to YYYY (assuming 00-30 = 2000-2030, 31-99 = 1931-1999)
+            int year = Integer.parseInt(yy);
+            String yyyy = (year <= 30) ? "20" + yy : "19" + yy;
+
+            return dd + "/" + mm + "/" + yyyy;
+        } catch (Exception e) {
+            return yymmdd;
+        }
+    }
+
 
     private void displayEepData(EepData data) {
         tvStatus.setText("✅ HK/Macao Travel Permit Read Complete!");
@@ -535,8 +955,10 @@ public class SmartDetectionFragment extends Fragment {
         result.append("Card Number: ").append(data.cardNumber != null ? data.cardNumber : data.documentNumber).append("\n");
         result.append("Nationality: ").append(data.nationality != null ? data.nationality : "CHN").append("\n");
         result.append("Gender: ").append(data.gender != null ? data.gender : "Unknown").append("\n");
-        result.append("Date of Birth: ").append(formatDate(data.dateOfBirth)).append("\n");
-        result.append("Date of Expiry: ").append(formatDate(data.dateOfExpiry)).append("\n");
+        result.append("Date of Birth: ").append(data.dateOfBirth).append("\n");
+        result.append("Date of Expiry: ").append(data.dateOfExpiry).append("\n");
+        result.append("Place of Birth: ").append(data.placeOfBirth).append("\n");
+
         result.append("\n");
 
         // Validity
@@ -588,42 +1010,6 @@ public class SmartDetectionFragment extends Fragment {
         result.append("═══════════════════════════════");
 
         tvResult.setText(result.toString());
-    }
-
-    private String formatDate(String yymmdd) {
-        if (yymmdd == null || yymmdd.isEmpty()) {
-            return "N/A";
-        }
-
-        String digits = yymmdd.replaceAll("[^0-9]", "");
-
-        if (digits.length() == 6) {
-            try {
-                String year = digits.substring(0, 2);
-                String month = digits.substring(2, 4);
-                String day = digits.substring(4, 6);
-
-                int yy = Integer.parseInt(year);
-                int fullYear = (yy > 50) ? (1900 + yy) : (2000 + yy);
-
-                return day + "/" + month + "/" + fullYear;
-            } catch (NumberFormatException e) {
-                return yymmdd;
-            }
-        }
-
-        if (digits.length() == 8) {
-            try {
-                String year = digits.substring(0, 4);
-                String month = digits.substring(4, 6);
-                String day = digits.substring(6, 8);
-                return day + "/" + month + "/" + year;
-            } catch (Exception e) {
-                return yymmdd;
-            }
-        }
-
-        return yymmdd;
     }
 
     public static String bytesToHex(byte[] bytes) {

@@ -44,10 +44,32 @@ public class EepDocumentReader implements IDocumentReader {
     }
 
     @Override
+    public DocumentData readDocument(Tag tag, DocumentAuthData authData,ProgressCallback progressCallback) throws Exception {
+        validateInputs(tag, authData);
+        if (progressCallback != null) {
+            progressCallback.onProgress("Starting document read...", 0);
+        }
+        ChipReadResult chipData = readChip(tag, authData,progressCallback);
+
+        if (progressCallback != null) {
+            progressCallback.onProgress("Processing data...", 95);
+        }
+
+        DocumentData result = mapToEepData(chipData);
+
+        if (progressCallback != null) {
+            progressCallback.onProgress("Complete", 100);
+        }
+
+        return result;
+    }
+
+
+    @Override
     public DocumentData readDocument(Tag tag, DocumentAuthData authData) throws Exception {
         validateInputs(tag, authData);
 
-        ChipReadResult chipData = readChip(tag, authData);
+        ChipReadResult chipData = readChip(tag, authData,null);
         return mapToEepData(chipData);
     }
 
@@ -77,12 +99,16 @@ public class EepDocumentReader implements IDocumentReader {
         }
     }
 
-    private ChipReadResult readChip(Tag tag, DocumentAuthData authData) throws Exception {
+    private ChipReadResult readChip(Tag tag, DocumentAuthData authData,ProgressCallback progressCallback) throws Exception {
         String docNumber = normalizeDocNumber(authData.getDocumentNumber());
         String birthDate = normalizeDateYYMMDD(authData.getDateOfBirth());
         String expiryDate = normalizeDateYYMMDD(authData.getDateOfExpiry());
 
         validateDates(birthDate, expiryDate);
+
+        if (progressCallback != null) {
+            progressCallback.onProgress("Connecting to chip...", 5);
+        }
 
         IsoDep isoDep = IsoDep.get(tag);
         if (isoDep == null) {
@@ -92,8 +118,13 @@ public class EepDocumentReader implements IDocumentReader {
         isoDep.setTimeout(EepConstants.ISO_DEP_TIMEOUT_MS);
         isoDep.connect();
 
+        if (progressCallback != null) {
+            progressCallback.onProgress("Connected to chip", 10);
+        }
+
+
         try {
-            return performChipRead(isoDep, docNumber, birthDate, expiryDate);
+            return performChipRead(isoDep, docNumber, birthDate, expiryDate, progressCallback);
         } finally {
             closeQuietly(isoDep);
         }
@@ -103,7 +134,8 @@ public class EepDocumentReader implements IDocumentReader {
             IsoDep isoDep,
             String docNumber,
             String birthDate,
-            String expiryDate) throws Exception {
+            String expiryDate,
+            ProgressCallback progressCallback) throws Exception {
 
         CardService cardService = CardService.getInstance(isoDep);
 //        rawService.open();
@@ -118,8 +150,15 @@ public class EepDocumentReader implements IDocumentReader {
                 false   // shouldCheckMAC
         );
         try {
+            if (progressCallback != null) {
+                progressCallback.onProgress("Opening passport service...", 15);
+            }
             passportService.open();
             passportService.sendSelectApplet(false);
+
+            if (progressCallback != null) {
+                progressCallback.onProgress("Authenticating...", 20);
+            }
 
             // Authenticate
             BACKey bacKey = new BACKey(docNumber, birthDate, expiryDate);
@@ -128,9 +167,11 @@ public class EepDocumentReader implements IDocumentReader {
             if (!authResult.success) {
                 throw new Exception("Authentication failed: " + authResult.errorMessage);
             }
-
+            if (progressCallback != null) {
+                progressCallback.onProgress("Authentication successful", 30);
+            }
             // Read data groups
-            return readDataGroups(passportService, authResult.method);
+            return readDataGroups(passportService, authResult.method, progressCallback);
 
         } finally {
             closeQuietly(passportService);
@@ -151,12 +192,18 @@ public class EepDocumentReader implements IDocumentReader {
 
     private ChipReadResult readDataGroups(
             PassportService service,
-            EmrtdAuthenticator.AuthMethod authMethod) throws Exception {
+            EmrtdAuthenticator.AuthMethod authMethod,
+            ProgressCallback progressCallback) throws Exception {
 
         ChipReadResult result = new ChipReadResult();
         result.authMethod = authMethod;
 
         DataGroupReader dgReader = new DataGroupReader(service);
+
+        // Read SOD first
+        if (progressCallback != null) {
+            progressCallback.onProgress("Reading security data (SOD)...", 35);
+        }
 
         // Read SOD first to get available data groups
         result.sodData = readSOD(service);
@@ -164,24 +211,56 @@ public class EepDocumentReader implements IDocumentReader {
             result.availableDataGroups = new ArrayList<>(result.sodData.dataGroupHashes.keySet());
         }
 
+        // Read DG1 - MRZ
+        if (progressCallback != null) {
+            progressCallback.onProgress("Reading document data (DG1)...", 45);
+        }
+
         // Read mandatory groups
         DG1File dg1 = dgReader.readDG1();
         result.mrzData = parseMrz(dg1);
 
+        if (progressCallback != null) {
+            progressCallback.onProgress("Reading photo (DG2)...", 55);
+        }
         result.faceImages = dgReader.readDG2();
 
-        // Read optional groups
+        int currentProgress = 60;
+
         if (isAvailable(result, 11)) {
+            if (progressCallback != null) {
+                progressCallback.onProgress("Reading additional data (DG11)...", currentProgress);
+            }
             result.dg11 = dgReader.readDG11();
+            currentProgress += 8;
         }
+
         if (isAvailable(result, 12)) {
+            if (progressCallback != null) {
+                progressCallback.onProgress("Reading issuing data (DG12)...", currentProgress);
+            }
             result.dg12 = dgReader.readDG12();
+            currentProgress += 8;
         }
+
         if (isAvailable(result, 14)) {
+            if (progressCallback != null) {
+                progressCallback.onProgress("Reading security features (DG14)...", currentProgress);
+            }
             result.dg14 = dgReader.readDG14();
+            currentProgress += 7;
         }
+
         if (isAvailable(result, 15)) {
+            if (progressCallback != null) {
+                progressCallback.onProgress("Reading public key (DG15)...", currentProgress);
+            }
             result.dg15 = dgReader.readDG15();
+            currentProgress += 7;
+        }
+
+        if (progressCallback != null) {
+            progressCallback.onProgress("Data groups read successfully", 90);
         }
 
         return result;
@@ -239,6 +318,7 @@ public class EepDocumentReader implements IDocumentReader {
         }
         Log.d(TAG, "====================================");
     }
+
     private EepMrzParser.ParseResult parseMrz(DG1File dg1) {
         String rawMrz = dg1.toString();
         Log.d(TAG, "Raw DG1: " + rawMrz);
@@ -293,7 +373,8 @@ public class EepDocumentReader implements IDocumentReader {
             out.firstName = mrz.firstName;
             out.lastName = mrz.lastName;
             out.chineseName = mrz.chineseName;
-            out.pinyinName = buildPinyinName(mrz.firstName, mrz.lastName);
+            out.pinyinName = buildPinyinName(mrz.lastName,mrz.firstName);
+            out.placeOfBirth = mrz.placeOfBirth;
         }
 
         // Apply DG11 overrides (more accurate name data)

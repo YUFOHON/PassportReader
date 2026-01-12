@@ -13,6 +13,10 @@ public interface IDocumentReader {
      */
     DocumentData readDocument(Tag tag, DocumentAuthData authData) throws Exception;
 
+    // Add progress callback support
+    DocumentData readDocument(Tag tag, DocumentAuthData authData, ProgressCallback progressCallback) throws Exception;
+
+
     /**
      * Check if this reader can handle the given tag
      */
@@ -27,4 +31,10 @@ public interface IDocumentReader {
      * Get reader name/identifier
      */
     String getReaderName();
+
+    // Progress callback interface
+    interface ProgressCallback {
+        void onProgress(String message, int progress);
+    }
+
 }
