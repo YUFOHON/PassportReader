@@ -25,7 +25,7 @@ public class Td3PassportParser extends BaseMrzParser {
         }
 
         // Should have at least 2 date patterns (DOB and Expiry)
-        return dateCount >= 2;
+        return dateCount >= 1;
     }
 
     @Override

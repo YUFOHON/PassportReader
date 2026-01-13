@@ -122,12 +122,16 @@ public class MRZCleaner {
         return new String(chars);
     }
 
-    /**
-     * Extracts and cleans MRZ data from candidate lines.
-     */
     public static String extractAndClean(List<String> mrzLines, String documentType) {
         if (mrzLines == null || mrzLines.isEmpty()) {
+            Log.d(TAG, "extractAndClean: null or empty input");
             return null;
+        }
+
+        Log.d(TAG, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        Log.d(TAG, "extractAndClean: " + mrzLines.size() + " candidates, docType=" + documentType);
+        for (int i = 0; i < mrzLines.size(); i++) {
+            Log.d(TAG, "  Raw line " + i + ": [" + mrzLines.get(i) + "] len=" + mrzLines.get(i).length());
         }
 
         String docType = documentType != null ? documentType :
@@ -138,40 +142,70 @@ public class MRZCleaner {
             String cleanedLine = cleanEEPLine(mrzLines.get(0));
             String normalized = normalizeMRZLineLength(cleanedLine, 30);
 
-            if (cleanedLine.length() >= 28 && cleanedLine.length() > 0 &&
-                    cleanedLine.charAt(0) == 'C') {
+            if (cleanedLine.length() >= 28 && cleanedLine.charAt(0) == 'C') {
                 return normalized;
             }
             return null;
         }
 
-        // Handle multi-line documents
+        // Handle multi-line documents (TD1, TD2, TD3)
         int targetLength = DocumentTypeDetector.getLineLength(docType);
         int requiredCount = DocumentTypeDetector.getRequiredLineCount(docType);
+        int minAcceptableLength = (int) (targetLength * 0.85);
+
+        Log.d(TAG, "Target: " + targetLength + " chars, required: " + requiredCount + " lines, minLen: " + minAcceptableLength);
 
         StringBuilder result = new StringBuilder();
-        int count = 0;
+        int validCount = 0;
 
         for (String line : mrzLines) {
-            if (count >= requiredCount) break;
+            if (validCount >= requiredCount) break;
 
             String cleaned = cleanMRZLine(line);
-            String normalized = normalizeMRZLineLength(cleaned, targetLength);
+            Log.d(TAG, "  Cleaned: [" + cleaned + "] len=" + cleaned.length());
 
-            if (count > 0) {
+            // Check length
+            if (cleaned.length() < minAcceptableLength) {
+                Log.d(TAG, "  ❌ REJECTED: too short (" + cleaned.length() + " < " + minAcceptableLength + ")");
+                continue;
+            }
+
+            // Check TD3 first line prefix - BE MORE LENIENT
+            if (validCount == 0 && "TD3".equals(docType)) {
+                char firstChar = cleaned.charAt(0);
+                // Accept P, V (visa), or common OCR errors for P
+                if (firstChar != 'P' && firstChar != 'V') {
+                    Log.d(TAG, "  ❌ REJECTED: TD3 first line doesn't start with P/V: '" + firstChar + "'");
+                    // BUT don't reject if it looks like MRZ (has << pattern)
+                    if (!cleaned.contains("<<")) {
+                        continue;
+                    }
+                    Log.d(TAG, "  ✅ RECOVERED: contains << pattern, accepting anyway");
+                }
+            }
+
+            String normalized = normalizeMRZLineLength(cleaned, targetLength);
+            Log.d(TAG, "  ✅ ACCEPTED: " + normalized.substring(0, Math.min(20, normalized.length())) + "...");
+
+            if (validCount > 0) {
                 result.append("\n");
             }
             result.append(normalized);
-            count++;
+            validCount++;
         }
 
-        if (count < Math.min(2, requiredCount)) {
+        Log.d(TAG, "Valid lines found: " + validCount + "/" + requiredCount);
+
+        if (validCount < 2) {
+            Log.d(TAG, "❌ FAILED: Not enough valid lines");
             return null;
         }
 
-        return result.toString();
+        String finalResult = result.toString();
+        Log.d(TAG, "✅ SUCCESS: Extracted MRZ:\n" + finalResult);
+        Log.d(TAG, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        return finalResult;
     }
-
     /**
      * Normalizes MRZ line length by padding with '<' or truncating.
      */

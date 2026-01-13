@@ -11,6 +11,7 @@ import android.util.Log;
 import androidx.camera.view.PreviewView;
 
 import com.example.reader.MRZGuidanceOverlay;
+import com.example.reader.utils.BitmapUtils;
 import com.google.android.gms.tasks.Tasks;
 import com.google.mlkit.vision.common.InputImage;
 import com.google.mlkit.vision.objects.DetectedObject;
@@ -68,7 +69,6 @@ public class DocumentAlignmentDetector {
     private volatile RectF cachedGuideBox = null;
 
     private boolean wasAlignedLastFrame = false;
-
 
     public DocumentAlignmentDetector(MRZGuidanceOverlay guidanceOverlay, PreviewView previewView) {
         this.guidanceOverlay = guidanceOverlay;
@@ -136,65 +136,91 @@ public class DocumentAlignmentDetector {
             orientedBitmap = rotateBitmap(bitmap, rotationDegrees);
         }
 
+        RectF guidanceRect = BitmapUtils.getGuidanceBoxInBitmapCoords(orientedBitmap, guidanceOverlay, previewView);
+
+        Bitmap croppedBitmap = BitmapUtils.cropToGuidanceArea(orientedBitmap, guidanceRect);
+
+        if (croppedBitmap == null) {
+            return new AlignmentResult(false, false, 0, "Crop failed", null);
+        }
+
         Log.d(TAG, "═══════════════════════════════════════");
         Log.d(TAG, "🔍 HYBRID ML + OPENCV ALIGNMENT CHECK");
 
         try {
-            // STEP 1: ML Object Detection (rough box)
-            RectF roughBoxInBitmap = detectDocumentML(orientedBitmap);
+            // STEP 1: ML Object Detection (rough box) - on CROPPED image
+            RectF roughBoxInCropped = detectDocumentML(croppedBitmap);
 
-            if (roughBoxInBitmap == null) {
+            if (roughBoxInCropped == null) {
                 Log.d(TAG, "⚠️ No document detected by ML");
                 consecutiveAlignmentCount = 0;
                 lastValidCorners = null;
+                if (croppedBitmap != orientedBitmap) {
+                    croppedBitmap.recycle();
+                }
                 return AlignmentResult.noDocument();
             }
 
-            Log.d(TAG, "📦 ML rough box: " + rectToString(roughBoxInBitmap));
+            Log.d(TAG, "📦 ML rough box (in cropped): " + rectToString(roughBoxInCropped));
 
-            // STEP 2: Crop ROI from bitmap
-            Bitmap roiBitmap = cropROI(orientedBitmap, roughBoxInBitmap);
+            // STEP 2: Crop ROI from the cropped bitmap
+            Bitmap roiBitmap = cropROI(croppedBitmap, roughBoxInCropped);
 
             if (roiBitmap == null) {
                 Log.d(TAG, "⚠️ Failed to crop ROI");
+                if (croppedBitmap != orientedBitmap) {
+                    croppedBitmap.recycle();
+                }
                 return AlignmentResult.noDocument();
             }
 
             // STEP 3: OpenCV edge detection + contour finding for refined corners
             Point[] refinedCornersInROI = refineWithOpenCV(roiBitmap);
 
-            // STEP 4: Map corners back to original bitmap coordinates
-            Point[] cornersInBitmap;
+            // STEP 4: Map corners from ROI → Cropped → Full Bitmap
+            Point[] cornersInCropped;
             if (refinedCornersInROI != null) {
-                cornersInBitmap = mapCornersFromROI(refinedCornersInROI, roughBoxInBitmap);
+                cornersInCropped = mapCornersFromROI(refinedCornersInROI, roughBoxInCropped);
                 Log.d(TAG, "✅ OpenCV refined 4 corners found");
             } else {
                 // Fallback to rough box corners
-                cornersInBitmap = boundsToCorners(roughBoxInBitmap);
+                cornersInCropped = boundsToCorners(roughBoxInCropped);
                 Log.d(TAG, "⚠️ OpenCV refinement failed, using ML box corners");
             }
 
             // Recycle ROI bitmap
-            if (roiBitmap != orientedBitmap) {
+            if (roiBitmap != croppedBitmap && roiBitmap != orientedBitmap) {
                 roiBitmap.recycle();
             }
 
-            // STEP 5: Map corners to preview coordinates
+            // **KEY FIX**: Map corners from cropped bitmap to full bitmap coordinates
+            Point[] cornersInFullBitmap = mapCornersFromCroppedToFull(cornersInCropped, guidanceRect);
+
+            Log.d(TAG, "🗺️ Corners in full bitmap:");
+            for (int i = 0; i < cornersInFullBitmap.length; i++) {
+                Log.d(TAG, "   Corner " + i + ": " + cornersInFullBitmap[i]);
+            }
+
+            // STEP 5: Map corners from full bitmap to preview coordinates
             Point[] cornersInPreview = mapCornersToPreview(
-                    cornersInBitmap,
+                    cornersInFullBitmap,
                     orientedBitmap.getWidth(),
                     orientedBitmap.getHeight()
             );
+
+            Log.d(TAG, "🗺️ Corners in preview:");
+            for (int i = 0; i < cornersInPreview.length; i++) {
+                Log.d(TAG, "   Corner " + i + ": " + cornersInPreview[i]);
+            }
 
             lastValidCorners = cornersInPreview;
 
             // STEP 6: Create bounding rect from corners for alignment check
             RectF documentBoundsInPreview = cornersToRect(cornersInPreview);
 
-            // After creating documentBoundsInPreview, add:
             Log.d(TAG, "🔍 DEBUG - Size Comparison:");
-            Log.d(TAG, "   Doc size: " + documentBoundsInPreview.width() + "x" + documentBoundsInPreview.height());
-            Log.d(TAG, "   Guide size: " + cachedGuideBox.width() + "x" + cachedGuideBox.height());
+            Log.d(TAG, "   Doc bounds: " + rectToString(documentBoundsInPreview));
+            Log.d(TAG, "   Guide box: " + rectToString(cachedGuideBox));
             Log.d(TAG, "   Width ratio: " + (documentBoundsInPreview.width() / cachedGuideBox.width()));
             Log.d(TAG, "   Height ratio: " + (documentBoundsInPreview.height() / cachedGuideBox.height()));
 
@@ -202,8 +228,6 @@ public class DocumentAlignmentDetector {
             AlignmentAnalysis analysis = analyzeAlignment(documentBoundsInPreview, cachedGuideBox);
 
             Log.d(TAG, "📊 Alignment Analysis:");
-            Log.d(TAG, "   Document: " + rectToString(documentBoundsInPreview));
-            Log.d(TAG, "   GuideBox: " + rectToString(cachedGuideBox));
             Log.d(TAG, "   IoU: " + String.format("%.2f", analysis.iou));
             Log.d(TAG, "   Position OK: " + analysis.positionOk);
             Log.d(TAG, "   Size OK: " + analysis.sizeOk);
@@ -215,11 +239,33 @@ public class DocumentAlignmentDetector {
             Log.e(TAG, "❌ Alignment check error", e);
             return AlignmentResult.error();
         } finally {
+            if (croppedBitmap != orientedBitmap && croppedBitmap != null) {
+                croppedBitmap.recycle();
+            }
             if (orientedBitmap != bitmap && orientedBitmap != null) {
                 orientedBitmap.recycle();
             }
             Log.d(TAG, "═══════════════════════════════════════\n");
         }
+    }
+
+    /**
+     * **NEW METHOD**: Map corners from cropped bitmap coordinates to full bitmap coordinates
+     */
+    private Point[] mapCornersFromCroppedToFull(Point[] cornersInCropped, RectF guidanceRect) {
+        Point[] cornersInFull = new Point[4];
+
+        int offsetX = (int) guidanceRect.left;
+        int offsetY = (int) guidanceRect.top;
+
+        for (int i = 0; i < 4; i++) {
+            cornersInFull[i] = new Point(
+                    cornersInCropped[i].x + offsetX,
+                    cornersInCropped[i].y + offsetY
+            );
+        }
+
+        return cornersInFull;
     }
 
     /**
@@ -448,25 +494,25 @@ public class DocumentAlignmentDetector {
     }
 
     /**
-     * STEP 4: Map corners from ROI coordinates back to original bitmap coordinates
+     * STEP 4: Map corners from ROI coordinates back to cropped bitmap coordinates
      */
     private Point[] mapCornersFromROI(Point[] roiCorners, RectF roughBox) {
         float padding = Math.min(roughBox.width(), roughBox.height()) * 0.1f;
         int offsetX = (int) (roughBox.left - padding);
         int offsetY = (int) (roughBox.top - padding);
 
-        Point[] bitmapCorners = new Point[4];
+        Point[] croppedCorners = new Point[4];
         for (int i = 0; i < 4; i++) {
-            bitmapCorners[i] = new Point(
+            croppedCorners[i] = new Point(
                     roiCorners[i].x + offsetX,
                     roiCorners[i].y + offsetY
             );
         }
-        return bitmapCorners;
+        return croppedCorners;
     }
 
     /**
-     * STEP 5: Map corners from bitmap to preview coordinates
+     * STEP 5: Map corners from full bitmap to preview coordinates
      */
     private Point[] mapCornersToPreview(Point[] bitmapCorners, int bitmapWidth, int bitmapHeight) {
         float bitmapAspect = (float) bitmapWidth / bitmapHeight;
@@ -477,10 +523,12 @@ public class DocumentAlignmentDetector {
         float offsetY = 0;
 
         if (bitmapAspect > previewAspect) {
+            // Bitmap is wider - fit to height
             scale = (float) cachedPreviewHeight / bitmapHeight;
             float scaledWidth = bitmapWidth * scale;
             offsetX = (scaledWidth - cachedPreviewWidth) / 2f;
         } else {
+            // Bitmap is taller - fit to width
             scale = (float) cachedPreviewWidth / bitmapWidth;
             float scaledHeight = bitmapHeight * scale;
             offsetY = (scaledHeight - cachedPreviewHeight) / 2f;
@@ -495,10 +543,9 @@ public class DocumentAlignmentDetector {
         }
 
         Log.d(TAG, "🗺️ Coordinate Mapping:");
-        Log.d(TAG, "   Bitmap: " + bitmapWidth + "x" + bitmapHeight + " (aspect: " + bitmapAspect + ")");
-        Log.d(TAG, "   Preview: " + cachedPreviewWidth + "x" + cachedPreviewHeight + " (aspect: " + previewAspect + ")");
-        Log.d(TAG, "   Scale: " + scale + ", OffsetX: " + offsetX + ", OffsetY: " + offsetY);
-
+        Log.d(TAG, "   Bitmap: " + bitmapWidth + "x" + bitmapHeight + " (aspect: " + String.format("%.2f", bitmapAspect) + ")");
+        Log.d(TAG, "   Preview: " + cachedPreviewWidth + "x" + cachedPreviewHeight + " (aspect: " + String.format("%.2f", previewAspect) + ")");
+        Log.d(TAG, "   Scale: " + String.format("%.2f", scale) + ", OffsetX: " + String.format("%.2f", offsetX) + ", OffsetY: " + String.format("%.2f", offsetY));
 
         return previewCorners;
     }
@@ -604,17 +651,18 @@ public class DocumentAlignmentDetector {
         float normalizedOffsetX = offsetX / guide.width();
         float normalizedOffsetY = offsetY / guide.height();
 
-        float widthRatio = document.width() / guide.width();
-        float heightRatio = document.height() / guide.height();
+        float docArea = document.width() * document.height();
+        float guideArea = guide.width() * guide.height();
+        float areaRatio = docArea / guideArea;
 
         boolean positionOk = Math.abs(normalizedOffsetX) <= POSITION_TOLERANCE &&
                 Math.abs(normalizedOffsetY) <= POSITION_TOLERANCE;
 
-        boolean sizeOk = widthRatio >= (1 - SIZE_TOLERANCE) && widthRatio <= (1 + SIZE_TOLERANCE) &&
-                heightRatio >= (1 - SIZE_TOLERANCE) && heightRatio <= (1 + SIZE_TOLERANCE);
+        boolean sizeOk = areaRatio >= 0.75f && areaRatio <= 1.30f;
 
         float positionScore = 1f - (Math.abs(normalizedOffsetX) + Math.abs(normalizedOffsetY)) / 2f;
-        float sizeScore = 1f - (Math.abs(1 - widthRatio) + Math.abs(1 - heightRatio)) / 2f;
+        float sizeScore = 1f - Math.abs(1f - areaRatio);
+
         float score = (iou * 0.5f) + (positionScore * 0.3f) + (sizeScore * 0.2f);
         score = Math.max(0f, Math.min(1f, score));
 
@@ -622,7 +670,7 @@ public class DocumentAlignmentDetector {
 
         String message = generateGuidanceMessage(
                 normalizedOffsetX, normalizedOffsetY,
-                widthRatio, heightRatio,
+                areaRatio,
                 iou, isAligned
         );
 
@@ -648,7 +696,7 @@ public class DocumentAlignmentDetector {
     }
 
     private String generateGuidanceMessage(float offsetX, float offsetY,
-                                           float widthRatio, float heightRatio,
+                                           float areaRatio,
                                            float iou, boolean isAligned) {
         if (isAligned) {
             return "Hold steady";
@@ -666,37 +714,27 @@ public class DocumentAlignmentDetector {
             return offsetX > 0 ? "Move document LEFT ←" : "Move document RIGHT →";
         }
 
-//        float avgRatio = (widthRatio + heightRatio) / 2f;
-//        if (avgRatio < (1 - SIZE_TOLERANCE)) {
-//            return "Move closer to document";
-//        }
-//        if (avgRatio > (1 + SIZE_TOLERANCE)) {
-//            return "Move away from document";
-//        }
-
-        float areaRatio = widthRatio * heightRatio;
-
-        if (areaRatio < 0.85f) {
+        if (areaRatio < 0.80f) {
             return "Move closer to document";
         }
-        if (areaRatio > 1.20f) {
+        if (areaRatio > 1.25f) {
             return "Move away from document";
         }
+
         if (iou < IOU_THRESHOLD) {
             return "Align document with frame";
         }
 
-        return "Adjust position slightly";
+        return "Hold steady";
     }
 
     private AlignmentResult processAnalysis(AlignmentAnalysis analysis, Point[] corners) {
         // Hysteresis: use lower threshold to MAINTAIN alignment, higher to GAIN it
         float effectiveIouThreshold = wasAlignedLastFrame ? 0.65f : IOU_THRESHOLD;
-        float effectiveSizeTolerance = wasAlignedLastFrame ? 0.20f : SIZE_TOLERANCE;
 
         boolean isAligned = analysis.iou >= effectiveIouThreshold &&
                 analysis.positionOk &&
-                (wasAlignedLastFrame ? true : analysis.sizeOk);
+                (wasAlignedLastFrame || analysis.sizeOk);
 
         if (isAligned) {
             consecutiveAlignmentCount++;
@@ -704,6 +742,8 @@ public class DocumentAlignmentDetector {
             Log.d(TAG, "✅ Aligned! Count: " + consecutiveAlignmentCount + "/" + REQUIRED_CONSECUTIVE_FRAMES);
 
             if (consecutiveAlignmentCount >= REQUIRED_CONSECUTIVE_FRAMES) {
+                Log.d(TAG, "🎯 ALIGNMENT COMPLETE - Stopping detector");
+
                 return new AlignmentResult(true, true, analysis.score,
                         "Document aligned!", corners);
             }
@@ -717,8 +757,6 @@ public class DocumentAlignmentDetector {
                     analysis.message, corners);
         }
     }
-
-
 
     private Bitmap rotateBitmap(Bitmap source, int degrees) {
         if (degrees == 0) return source;
@@ -751,8 +789,6 @@ public class DocumentAlignmentDetector {
         objectDetector.close();
         executorService.shutdown();
     }
-
-
 
     // ═══════════════════════════════════════════════════════════════════════════
     // INNER CLASSES

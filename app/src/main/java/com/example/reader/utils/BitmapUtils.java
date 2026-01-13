@@ -18,6 +18,8 @@ import androidx.camera.view.PreviewView;
 import com.example.reader.MRZGuidanceOverlay;
 import com.google.mlkit.vision.common.InputImage;
 
+import org.opencv.core.Rect;
+
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.OutputStream;
@@ -636,6 +638,71 @@ public class BitmapUtils {
             return null;
         }
     }
+
+    /**
+     * Crop bitmap to guidance area
+     */
+    public static Bitmap cropToGuidanceArea(Bitmap source, RectF guidanceRect) {
+        try {
+            int x = Math.max(0, (int) guidanceRect.left);
+            int y = Math.max(0, (int) guidanceRect.top);
+            int width = (int) (guidanceRect.right - guidanceRect.left);
+            int height = (int) (guidanceRect.bottom - guidanceRect.top);
+
+            if (width <= 0 || height <= 0 ||
+                    x + width > source.getWidth() ||
+                    y + height > source.getHeight()) {
+                return null;
+            }
+
+            return Bitmap.createBitmap(source, x, y, width, height);
+
+        } catch (Exception e) {
+            Log.e(TAG, "❌ Error cropping", e);
+            return null;
+        }
+    }
+
+    /**
+     * Get guidance box coordinates in bitmap coordinate space
+     */
+    public static RectF getGuidanceBoxInBitmapCoords(Bitmap bitmap, MRZGuidanceOverlay guidanceOverlay, PreviewView previewView) {
+        // Get guidance box rect in view coordinates
+        RectF viewGuidanceRect = guidanceOverlay.getGuidanceBoxRect();
+
+        int previewWidth = previewView.getWidth();
+        int previewHeight = previewView.getHeight();
+        int bitmapWidth = bitmap.getWidth();
+        int bitmapHeight = bitmap.getHeight();
+
+        Log.d(TAG, "📐 Coordinate mapping:");
+        Log.d(TAG, "   Preview: " + previewWidth + "x" + previewHeight);
+        Log.d(TAG, "   Bitmap: " + bitmapWidth + "x" + bitmapHeight);
+        Log.d(TAG, "   Guidance (view): " + viewGuidanceRect.toString());
+
+        // Calculate scaling factors
+        float scaleX = (float) bitmapWidth / previewWidth;
+        float scaleY = (float) bitmapHeight / previewHeight;
+
+        // Map to bitmap coordinates
+        RectF bitmapRect = new RectF(
+                viewGuidanceRect.left * scaleX,
+                viewGuidanceRect.top * scaleY,
+                viewGuidanceRect.right * scaleX,
+                viewGuidanceRect.bottom * scaleY
+        );
+
+        // Ensure rect is within bitmap bounds
+        bitmapRect.left = Math.max(0, bitmapRect.left);
+        bitmapRect.top = Math.max(0, bitmapRect.top);
+        bitmapRect.right = Math.min(bitmapWidth, bitmapRect.right);
+        bitmapRect.bottom = Math.min(bitmapHeight, bitmapRect.bottom);
+
+        return bitmapRect;
+    }
+
+
+
     /**
      * Checks if a bitmap is valid (not null and not recycled)
      */
