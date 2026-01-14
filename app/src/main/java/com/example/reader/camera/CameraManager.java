@@ -2,8 +2,6 @@ package com.example.reader.camera;
 
 import android.content.Context;
 import android.util.Log;
-import android.util.Size;
-import android.view.Surface;
 
 import androidx.camera.core.AspectRatio;
 import androidx.camera.core.CameraSelector;
@@ -26,19 +24,17 @@ public class CameraManager {
     private final LifecycleOwner lifecycleOwner;
     private final PreviewView previewView;
     private final ExecutorService executor;
-    private MRZDetectionHandler detectionHandler; // Remove final
+    private MRZDetectionHandler detectionHandler;
     private ImageCapture imageCapture;
 
-    // Constructor without detectionHandler
     public CameraManager(LifecycleOwner lifecycleOwner, PreviewView previewView,
                          ExecutorService executor) {
         this.lifecycleOwner = lifecycleOwner;
         this.previewView = previewView;
         this.executor = executor;
-        this.detectionHandler = null; // Will be set later
+        this.detectionHandler = null;
     }
 
-    // Setter for detection handler
     public void setDetectionHandler(MRZDetectionHandler detectionHandler) {
         this.detectionHandler = detectionHandler;
         Log.d(TAG, "✅ Detection handler injected");
@@ -64,25 +60,31 @@ public class CameraManager {
             Log.e(TAG, "❌ Cannot bind camera: detectionHandler is null!");
             return;
         }
-        int rotation = Surface.ROTATION_0;
+
+        int rotation = android.view.Surface.ROTATION_0;
         if (previewView.getDisplay() != null) {
             rotation = previewView.getDisplay().getRotation();
         }
 
-        Preview preview = new Preview.Builder().build();
+        Preview preview = new Preview.Builder()
+                .setTargetAspectRatio(AspectRatio.RATIO_4_3)
+                .build();
         preview.setSurfaceProvider(previewView.getSurfaceProvider());
 
+        // Optimized ImageAnalysis for faster processing
         ImageAnalysis imageAnalysis = new ImageAnalysis.Builder()
                 .setTargetAspectRatio(AspectRatio.RATIO_4_3)
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .setTargetRotation(rotation)
-                .setImageQueueDepth(2)
+                .setImageQueueDepth(1) // Reduced from 2 for faster processing
+                .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
                 .build();
 
         imageAnalysis.setAnalyzer(executor, detectionHandler::analyzeImage);
 
+        // High quality capture for final image
         imageCapture = new ImageCapture.Builder()
-                .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY) // Changed for speed
                 .setTargetAspectRatio(AspectRatio.RATIO_4_3)
                 .setTargetRotation(rotation)
                 .build();
@@ -91,7 +93,7 @@ public class CameraManager {
         cameraProvider.unbindAll();
         cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, preview, imageAnalysis, imageCapture);
 
-        Log.d(TAG, "✅ Camera started successfully");
+        Log.d(TAG, "✅ Camera started successfully with optimized settings");
     }
 
     public ImageCapture getImageCapture() {
@@ -99,6 +101,6 @@ public class CameraManager {
     }
 
     public void cleanup() {
-        // Cleanup resources if needed
+        Log.d(TAG, "🧹 CameraManager cleanup");
     }
 }

@@ -4,7 +4,6 @@ import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Bitmap;
-import android.graphics.Matrix;
 import android.util.Log;
 import android.widget.TextView;
 
@@ -38,9 +37,11 @@ import org.opencv.core.Size;
 import org.opencv.imgproc.CLAHE;
 import org.opencv.imgproc.Imgproc;
 
+import java.util.List;
+
 public class MRZDetectionHandler {
     private static final String TAG = "MRZDetectionHandler";
-    private static final long PROCESS_INTERVAL = 50;
+    private static final long PROCESS_INTERVAL = 0;
 
     private final Context context;
     private final TextRecognizer recognizer;
@@ -55,6 +56,7 @@ public class MRZDetectionHandler {
     private volatile boolean isCapturingHighRes = false;
     private int frameCount = 0;
     private Bitmap capturedBitmap;
+    private Bitmap lastHighResBitmap;
     private final MRZGuidanceOverlay guidanceOverlay;
     private final PreviewView previewView;
 
@@ -80,8 +82,12 @@ public class MRZDetectionHandler {
     }
 
     public void analyzeImage(@NonNull ImageProxy imageProxy) {
-        // Skip if already scanned or capturing
-        if (mrzProcessor.hasScanned() || isCapturingHighRes || !shouldProcessFrame()) {
+        if (mrzProcessor.hasScanned() || isCapturingHighRes) {
+            imageProxy.close();
+            return;
+        }
+
+        if (!shouldProcessFrame()) {
             imageProxy.close();
             return;
         }
@@ -139,40 +145,7 @@ public class MRZDetectionHandler {
             capturedBitmap.recycle();
         }
         capturedBitmap = newBitmap;
-        Log.d(TAG, "💾 Captured bitmap updated");
     }
-
-//    private void processWithAlignment(InputImage image, ImageProxy imageProxy) {
-//        Log.d(TAG, "🎯 Checking alignment...");
-//
-//        DocumentAlignmentDetector.AlignmentResult alignmentResult =
-//                alignmentDetector.checkAlignment(capturedBitmap);
-//
-//        Log.d(TAG, "📍 Alignment Result:");
-//        Log.d(TAG, "   ├─ Document Detected: " + alignmentResult.documentDetected);
-//        Log.d(TAG, "   ├─ Is Aligned: " + alignmentResult.isAligned);
-//        Log.d(TAG, "   ├─ Score: " + String.format("%.2f", alignmentResult.alignmentScore));
-//        Log.d(TAG, "   ├─ Message: " + alignmentResult.message);
-//        Log.d(TAG, "   └─ Corners: " + (alignmentResult.corners != null ? alignmentResult.corners.length : "null"));
-//
-//        uiUpdater.updateAlignmentUI(alignmentResult);
-//
-//        if (alignmentResult.isAligned) {
-//            Log.d(TAG, "✅ Document aligned - Processing OCR");
-//            recognizer.process(image)
-//                    .addOnSuccessListener(text -> {
-//                        Log.d(TAG, "📝 OCR Success - Text blocks: " + text.getTextBlocks().size());
-//                        processOCRResult(text);
-//                    })
-//                    .addOnFailureListener(e -> Log.e(TAG, "❌ OCR failed", e))
-//                    .addOnCompleteListener(task -> finalizeImageProcessing(imageProxy));
-//        } else {
-//            Log.d(TAG, "⏸️  Not aligned - Skipping OCR");
-//            mrzProcessor.resetDetection();
-//            finalizeImageProcessing(imageProxy);
-//        }
-//    }
-private Bitmap lastHighResBitmap; // Add this field
 
     private void processWithAlignment(InputImage image, ImageProxy imageProxy) {
         DocumentAlignmentDetector.AlignmentResult alignmentResult =
@@ -180,103 +153,124 @@ private Bitmap lastHighResBitmap; // Add this field
 
         uiUpdater.updateAlignmentUI(alignmentResult);
 
-        if (alignmentResult.isAligned && !isCapturingHighRes) {
-            isCapturingHighRes = true;
+        if (alignmentResult.isAligned) {
+            Log.d(TAG, "✅ Document aligned - Processing preview OCR");
 
-            imageProxy.close();
-            isProcessing = false;
-
-            cameraManager.getImageCapture().takePicture(
-                    ContextCompat.getMainExecutor(context),
-                    new ImageCapture.OnImageCapturedCallback() {
-                        @Override
-                        public void onCaptureSuccess(@NonNull ImageProxy highResImage) {
-                            Bitmap highRes = BitmapUtils.imageProxyToBitmap(highResImage);
-                            highResImage.close();
-
-                            if (highRes == null) {
-                                isCapturingHighRes = false;
-                                return;
-                            }
-
-                            Bitmap cropped = BitmapUtils.cropToGuidanceOverlay(highRes, guidanceOverlay, previewView);
-
-                            // Store the high-res cropped bitmap for later saving
-                            if (lastHighResBitmap != null) {
-                                lastHighResBitmap.recycle();
-                            }
-                            lastHighResBitmap = BitmapUtils.copyBitmap(cropped);
-
-                            Bitmap preprocessed = preprocessForOCR(cropped);
-
-                            InputImage ocrInput = InputImage.fromBitmap(preprocessed, 0);
-                            recognizer.process(ocrInput)
-                                    .addOnSuccessListener(MRZDetectionHandler.this::processOCRResult)
-                                    .addOnFailureListener(e -> {
-                                        Log.e(TAG, "❌ OCR failed", e);
-                                    })
-                                    .addOnCompleteListener(task -> {
-                                        if (!mrzProcessor.hasScanned()) {
-                                            isCapturingHighRes = false;
-                                        }
-                                        // Cleanup
-                                        highRes.recycle();
-                                        cropped.recycle();
-                                        preprocessed.recycle();
-                                    });
-                        }
-
-                        @Override
-                        public void onError(@NonNull ImageCaptureException exception) {
-                            Log.e(TAG, "❌ High-res capture failed", exception);
-                            isCapturingHighRes = false;
-                        }
-                    });
+            recognizer.process(image)
+                    .addOnSuccessListener(text -> {
+                        Log.d(TAG, "📝 Preview OCR Success - Text blocks: " + text.getTextBlocks().size());
+                        processPreviewOCRResult(text);
+                    })
+                    .addOnFailureListener(e -> Log.e(TAG, "❌ Preview OCR failed", e))
+                    .addOnCompleteListener(task -> finalizeImageProcessing(imageProxy));
         } else {
+            Log.d(TAG, "⏸️  Not aligned - Skipping OCR");
+            mrzProcessor.resetDetection();
             finalizeImageProcessing(imageProxy);
         }
     }
-    public static Bitmap preprocessForOCR(Bitmap input) {
-        Mat src = new Mat();
-        Utils.bitmapToMat(input, src);
 
-        // Convert to grayscale
-        Mat gray = new Mat();
-        Imgproc.cvtColor(src, gray, Imgproc.COLOR_RGBA2GRAY);
-
-        // Apply CLAHE for contrast enhancement
-        CLAHE clahe = Imgproc.createCLAHE(2.0, new Size(8, 8));
-        Mat enhanced = new Mat();
-        clahe.apply(gray, enhanced);
-
-        // Sharpen
-        Mat sharpened = new Mat();
-        Imgproc.GaussianBlur(enhanced, sharpened, new Size(0, 0), 3);
-        Core.addWeighted(enhanced, 1.5, sharpened, -0.5, 0, sharpened);
-
-        // Adaptive threshold for binarization (optional, test both)
-        // Imgproc.adaptiveThreshold(sharpened, sharpened, 255,
-        //     Imgproc.ADAPTIVE_THRESH_GAUSSIAN_C, Imgproc.THRESH_BINARY, 11, 2);
-
-        Bitmap result = Bitmap.createBitmap(input.getWidth(), input.getHeight(), Bitmap.Config.ARGB_8888);
-        Utils.matToBitmap(sharpened, result);
-
-        // Cleanup
-        src.release();
-        gray.release();
-        enhanced.release();
-        sharpened.release();
-
-        return result;
-    }
-
-    private void processOCRResult(Text text) {
-
-
-        var candidates = ocrProcessor.extractMRZCandidates(text,
+    private void processPreviewOCRResult(Text text) {
+        List<OCRProcessor.MRZCandidate> candidates = ocrProcessor.extractMRZCandidates(text,
                 alignmentDetector.getPreviewView().getHeight());
 
-        Log.d(TAG, "🔍 MRZ Candidates extracted: " + candidates.size());
+        Log.d(TAG, "🔍 Preview MRZ Candidates: " + candidates.size());
+
+        if (!candidates.isEmpty() && hasPotentialMRZ(candidates)) {
+            Log.d(TAG, "🎯 Potential MRZ detected - Capturing high-res image");
+            captureHighResAndProcess();
+        } else {
+            var result = mrzProcessor.processDetection(candidates);
+            uiUpdater.updateDetectionUI(result);
+        }
+    }
+
+    private boolean hasPotentialMRZ(List<OCRProcessor.MRZCandidate> candidates) {
+        for (OCRProcessor.MRZCandidate candidate : candidates) {
+            String cleaned = candidate.text.replaceAll("\\s", "");
+            if (cleaned.length() >= 28 && cleaned.length() <= 46) {
+                if (cleaned.contains("<") || cleaned.matches(".*[A-Z]{10,}.*")) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private void captureHighResAndProcess() {
+        if (isCapturingHighRes) {
+            Log.d(TAG, "⏳ Already capturing high-res, skipping");
+            return;
+        }
+
+        isCapturingHighRes = true;
+        Log.d(TAG, "📷 Starting high-res capture...");
+
+        cameraManager.getImageCapture().takePicture(
+                ContextCompat.getMainExecutor(context),
+                new ImageCapture.OnImageCapturedCallback() {
+                    @Override
+                    public void onCaptureSuccess(@NonNull ImageProxy highResImage) {
+                        Log.d(TAG, "📷 High-res capture success: " +
+                                highResImage.getWidth() + "x" + highResImage.getHeight());
+
+                        Bitmap highRes = BitmapUtils.imageProxyToBitmap(highResImage);
+                        highResImage.close();
+
+                        if (highRes == null) {
+                            Log.e(TAG, "❌ Failed to convert high-res image");
+                            isCapturingHighRes = false;
+                            return;
+                        }
+
+                        processHighResImage(highRes);
+                    }
+
+                    @Override
+                    public void onError(@NonNull ImageCaptureException exception) {
+                        Log.e(TAG, "❌ High-res capture failed", exception);
+                        isCapturingHighRes = false;
+                    }
+                });
+    }
+
+    private void processHighResImage(Bitmap highRes) {
+        Bitmap cropped = BitmapUtils.cropToGuidanceOverlay(highRes, guidanceOverlay, previewView);
+
+        if (lastHighResBitmap != null) {
+            lastHighResBitmap.recycle();
+        }
+        lastHighResBitmap = BitmapUtils.copyBitmap(cropped);
+
+        Bitmap preprocessed = preprocessForOCR(cropped);
+
+        InputImage ocrInput = InputImage.fromBitmap(preprocessed, 0);
+
+        recognizer.process(ocrInput)
+                .addOnSuccessListener(text -> {
+                    Log.d(TAG, "📝 High-res OCR Success - Text blocks: " + text.getTextBlocks().size());
+                    processHighResOCRResult(text);
+                })
+                .addOnFailureListener(e -> {
+                    Log.e(TAG, "❌ High-res OCR failed", e);
+                    isCapturingHighRes = false;
+                })
+                .addOnCompleteListener(task -> {
+                    highRes.recycle();
+                    cropped.recycle();
+                    preprocessed.recycle();
+
+                    if (!mrzProcessor.hasScanned()) {
+                        isCapturingHighRes = false;
+                    }
+                });
+    }
+
+    private void processHighResOCRResult(Text text) {
+        List<OCRProcessor.MRZCandidate> candidates = ocrProcessor.extractMRZCandidates(text,
+                alignmentDetector.getPreviewView().getHeight());
+
+        Log.d(TAG, "🔍 High-res MRZ Candidates: " + candidates.size());
 
         var result = mrzProcessor.processDetection(candidates);
 
@@ -288,11 +282,35 @@ private Bitmap lastHighResBitmap; // Add this field
 
         if (result.shouldAccept()) {
             handleSuccessfulScan(result);
-        }else {
-
-            Log.d(TAG, "Declineing result, continuing scanning.");
-
+        } else {
+            Log.d(TAG, "⚠️ High-res scan declined, continuing...");
         }
+    }
+
+    public static Bitmap preprocessForOCR(Bitmap input) {
+        Mat src = new Mat();
+        Utils.bitmapToMat(input, src);
+
+        Mat gray = new Mat();
+        Imgproc.cvtColor(src, gray, Imgproc.COLOR_RGBA2GRAY);
+
+        CLAHE clahe = Imgproc.createCLAHE(2.0, new Size(8, 8));
+        Mat enhanced = new Mat();
+        clahe.apply(gray, enhanced);
+
+        Mat sharpened = new Mat();
+        Imgproc.GaussianBlur(enhanced, sharpened, new Size(0, 0), 3);
+        Core.addWeighted(enhanced, 1.5, sharpened, -0.5, 0, sharpened);
+
+        Bitmap result = Bitmap.createBitmap(input.getWidth(), input.getHeight(), Bitmap.Config.ARGB_8888);
+        Utils.matToBitmap(sharpened, result);
+
+        src.release();
+        gray.release();
+        enhanced.release();
+        sharpened.release();
+
+        return result;
     }
 
     private void handleSuccessfulScan(MRZProcessor.DetectionResult result) {
@@ -305,7 +323,6 @@ private Bitmap lastHighResBitmap; // Add this field
 
         Activity activity = (Activity) context;
 
-        // Save the already-captured high-res bitmap
         if (lastHighResBitmap != null) {
             String savedPath = BitmapUtils.saveBitmapToFile(context, lastHighResBitmap);
             Log.d(TAG, "📷 High-res document saved: " + savedPath);
@@ -315,30 +332,22 @@ private Bitmap lastHighResBitmap; // Add this field
 
         sendResultAndFinish(activity, result);
     }
-    /**
-     * Send result data to activity and finish
-     */
+
     private void sendResultAndFinish(Activity activity, MRZProcessor.DetectionResult result) {
         Intent resultIntent = new Intent();
 
-        // Extract MRZ data from result
         if (result.getMrzInfo() != null) {
             var mrzInfo = result.getMrzInfo();
 
-            // Add basic MRZ data
             resultIntent.putExtra(Constants.EXTRA_DOC_NUM, mrzInfo.documentNumber);
             resultIntent.putExtra(Constants.EXTRA_DOB, mrzInfo.dateOfBirth);
             resultIntent.putExtra(Constants.EXTRA_EXPIRY, mrzInfo.expiryDate);
-
-            // Add MRZ line count
             resultIntent.putExtra(Constants.EXTRA_MRZ_LINES, result.getMrzLineCount());
 
-            // Add document type code if available
             if (mrzInfo.documentCode != null && !mrzInfo.documentCode.isEmpty()) {
                 resultIntent.putExtra(Constants.EXTRA_DOC_TYPE, mrzInfo.documentCode);
             }
 
-            // Add additional data
             resultIntent.putExtra("FIRST_NAME", mrzInfo.givenNames);
             resultIntent.putExtra("LAST_NAME", mrzInfo.surname);
             resultIntent.putExtra("NATIONALITY", mrzInfo.nationality);
@@ -353,23 +362,19 @@ private Bitmap lastHighResBitmap; // Add this field
             Log.d(TAG, "   └─ Doc Type: " + mrzInfo.documentCode);
         }
 
-        // Show success UI
         uiUpdater.showSuccess();
 
-        // Small delay to ensure UI feedback is visible
         new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
             activity.setResult(Activity.RESULT_OK, resultIntent);
             activity.finish();
-        }, 300); // 300ms delay for visual feedback
+        }, 300);
     }
 
     private void finalizeImageProcessing(ImageProxy imageProxy) {
         imageProxy.close();
         isProcessing = false;
-        Log.d(TAG, "🏁 Frame processing complete\n");
+        Log.d(TAG, "🏁 Frame processing complete");
     }
-
-
 
     public Bitmap getCapturedBitmap() {
         return capturedBitmap;

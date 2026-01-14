@@ -59,6 +59,16 @@ public class MRZProcessor {
             hasScanned = true;
             // Parse the MRZ using MrzParserManager
             MRZInfo mrzInfo = parseMRZ(extractedMRZ, docType);
+
+            if (mrzInfo == null) {
+                Log.w(TAG, "MRZ parsing returned null info");
+                return new DetectionResult(false, candidates.size(), extractedMRZ,
+                        detectedDocumentType, lastConfidence, consecutiveDetectionCount,
+                        REQUIRED_CONSECUTIVE_DETECTIONS, false, mrzInfo);
+            } else {
+                Log.d(TAG, "MRZ parsed successfully: DocNum=" + mrzInfo.documentNumber);
+            }
+
             return new DetectionResult(true, candidates.size(), extractedMRZ,
                     detectedDocumentType, lastConfidence, consecutiveDetectionCount,
                     REQUIRED_CONSECUTIVE_DETECTIONS, shouldAccept, mrzInfo);
