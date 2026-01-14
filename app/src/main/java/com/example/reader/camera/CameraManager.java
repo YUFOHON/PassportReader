@@ -3,6 +3,7 @@ package com.example.reader.camera;
 import android.content.Context;
 import android.util.Log;
 import android.util.Size;
+import android.view.Surface;
 
 import androidx.camera.core.AspectRatio;
 import androidx.camera.core.CameraSelector;
@@ -63,16 +64,18 @@ public class CameraManager {
             Log.e(TAG, "❌ Cannot bind camera: detectionHandler is null!");
             return;
         }
+        int rotation = Surface.ROTATION_0;
+        if (previewView.getDisplay() != null) {
+            rotation = previewView.getDisplay().getRotation();
+        }
 
         Preview preview = new Preview.Builder().build();
         preview.setSurfaceProvider(previewView.getSurfaceProvider());
 
-
-
         ImageAnalysis imageAnalysis = new ImageAnalysis.Builder()
                 .setTargetAspectRatio(AspectRatio.RATIO_4_3)
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                .setTargetRotation(previewView.getDisplay().getRotation())
+                .setTargetRotation(rotation)
                 .setImageQueueDepth(2)
                 .build();
 
@@ -81,7 +84,7 @@ public class CameraManager {
         imageCapture = new ImageCapture.Builder()
                 .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
                 .setTargetAspectRatio(AspectRatio.RATIO_4_3)
-                .setTargetRotation(previewView.getDisplay().getRotation())
+                .setTargetRotation(rotation)
                 .build();
 
         CameraSelector cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA;

@@ -18,7 +18,7 @@ public abstract class DocumentData {
         VISA,
         RESIDENCE_PERMIT,
         TRAVEL_DOCUMENT,
-        EEEP, UNKNOWN
+        EEP, UNKNOWN
     }
 
     // Common fields for all documents

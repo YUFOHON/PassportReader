@@ -1,6 +1,5 @@
 package com.example.reader.models;
 
-import android.graphics.Bitmap;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -58,7 +57,7 @@ public class EepData extends DocumentData {
     public int sodRawSize;
 
     public EepData() {
-        super(DocumentType.EEEP);
+        super(DocumentType.EEP);
         this.documentCode = "EEP";
     }
 

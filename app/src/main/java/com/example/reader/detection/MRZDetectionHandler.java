@@ -40,7 +40,7 @@ import org.opencv.imgproc.Imgproc;
 
 public class MRZDetectionHandler {
     private static final String TAG = "MRZDetectionHandler";
-    private static final long PROCESS_INTERVAL = 250;
+    private static final long PROCESS_INTERVAL = 50;
 
     private final Context context;
     private final TextRecognizer recognizer;

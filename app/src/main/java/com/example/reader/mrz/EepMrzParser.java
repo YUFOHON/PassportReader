@@ -3,6 +3,8 @@ package com.example.reader.mrz;
 import android.content.Intent;
 import android.util.Log;
 
+import com.example.reader.models.DocumentData;
+
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -129,7 +131,7 @@ public class EepMrzParser extends BaseMrzParser {
             resultIntent.putExtra("DOC_NUM", docNum);
             resultIntent.putExtra("DOB", dob);
             resultIntent.putExtra("EXPIRY", expiry);
-            resultIntent.putExtra("DOC_TYPE", "EEP");
+            resultIntent.putExtra("DOC_TYPE", DocumentData.DocumentType.EEP.name());
 
             Log.d(TAG, "EEP: Successfully parsed MRZ!");
             return resultIntent;

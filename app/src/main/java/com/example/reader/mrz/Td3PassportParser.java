@@ -3,6 +3,8 @@ package com.example.reader.mrz;
 import android.content.Intent;
 import android.util.Log;
 
+import com.example.reader.models.DocumentData;
+
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -106,7 +108,7 @@ public class Td3PassportParser extends BaseMrzParser {
             resultIntent.putExtra("EXPIRY", expiry);
             resultIntent.putExtra("NATIONALITY", nationality);
             resultIntent.putExtra("SEX", String.valueOf(sex));
-            resultIntent.putExtra("DOC_TYPE", "TD3_PASSPORT");
+            resultIntent.putExtra("DOC_TYPE", DocumentData.DocumentType.PASSPORT.name());
 
             Log.d(TAG, "TD3: Successfully parsed MRZ!");
             return resultIntent;

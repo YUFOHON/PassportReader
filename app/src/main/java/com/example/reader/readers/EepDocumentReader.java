@@ -80,7 +80,7 @@ public class EepDocumentReader implements IDocumentReader {
 
     @Override
     public DocumentData.DocumentType[] getSupportedTypes() {
-        return new DocumentData.DocumentType[] { DocumentData.DocumentType.EEEP };
+        return new DocumentData.DocumentType[] { DocumentData.DocumentType.EEP};
     }
 
     @Override
@@ -357,7 +357,7 @@ public class EepDocumentReader implements IDocumentReader {
     private EepData mapToEepData(ChipReadResult chipData) {
         EepData out = new EepData();
 
-        out.documentType = DocumentData.DocumentType.EEEP;
+        out.documentType = DocumentData.DocumentType.EEP;
 
         // Map MRZ data
         EepMrzParser.ParseResult mrz = chipData.mrzData;

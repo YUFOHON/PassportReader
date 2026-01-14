@@ -215,7 +215,7 @@ public class SmartDetectionFragment extends Fragment {
         switch (type) {
             case PASSPORT:
                 return "Passport";
-            case EEEP:
+            case EEP:
                 return "HK/Macao Travel Permit";
             default:
                 return "Document";
@@ -301,7 +301,8 @@ public class SmartDetectionFragment extends Fragment {
             String docTypeCode = data.getStringExtra(Constants.EXTRA_DOC_TYPE);
 
             // Determine document type based on MRZ lines or doc type code
-            detectedDocumentType = determineDocumentType(mrzLineCount, docTypeCode);
+//            detectedDocumentType = determineDocumentType(mrzLineCount, docTypeCode);
+            detectedDocumentType = DocumentData.DocumentType.valueOf(data.getStringExtra(Constants.EXTRA_DOC_TYPE));
 
             final String finalDocNum = docNum;
             final String finalDob = dob;
@@ -353,7 +354,7 @@ public class SmartDetectionFragment extends Fragment {
 
                 case Constants.DOC_TYPE_EEP_CHINA:
                     Log.d(TAG, "Detected EEP from doc type code");
-                    return DocumentData.DocumentType.EEEP;
+                    return DocumentData.DocumentType.EEP;
 
                 case Constants.DOC_TYPE_TD1:
                     Log.d(TAG, "Detected TD1/ID CARD from doc type code");
@@ -378,7 +379,7 @@ public class SmartDetectionFragment extends Fragment {
         Log.d(TAG, "Determining document type from MRZ line count: " + mrzLines);
         switch (mrzLines) {
             case 1:
-                return DocumentData.DocumentType.EEEP;
+                return DocumentData.DocumentType.EEP;
             case 2:
                 return DocumentData.DocumentType.PASSPORT;
             case 3:
@@ -388,6 +389,7 @@ public class SmartDetectionFragment extends Fragment {
                 return DocumentData.DocumentType.PASSPORT;
         }
     }
+
     private void updateDetectedTypeDisplay() {
         if (tvDetectedType == null) return;
 
@@ -402,7 +404,7 @@ public class SmartDetectionFragment extends Fragment {
                     icon = "📘";
                     typeName = "Passport (TD3)";
                     break;
-                case EEEP:
+                case EEP:
                     icon = "📄";
                     typeName = "HK/Macao Travel Permit";
                     break;
