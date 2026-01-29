@@ -10,6 +10,7 @@ import android.util.Log;
 
 import androidx.camera.view.PreviewView;
 
+import com.example.reader.Configuration;
 import com.example.reader.MRZGuidanceOverlay;
 import com.example.reader.utils.BitmapUtils;
 import com.google.android.gms.tasks.Tasks;
@@ -39,20 +40,20 @@ import java.util.concurrent.Executors;
 public class DocumentAlignmentDetector {
     private static final String TAG = "AlignmentDetector";
 
-    private static final int REQUIRED_CONSECUTIVE_FRAMES = 3;
-    private static final long DETECTION_COOLDOWN_MS = 50;
+    private int REQUIRED_CONSECUTIVE_FRAMES = 3;
+    private long DETECTION_COOLDOWN_MS = 50;
 
     // Alignment thresholds
-    private static final float POSITION_TOLERANCE = 0.15f;
-    private static final float SIZE_TOLERANCE = 0.15f;
-    private static final float IOU_THRESHOLD = 0.70f;
+    private float POSITION_TOLERANCE = 0.15f;
+    private float SIZE_TOLERANCE = 0.15f;
+    private float IOU_THRESHOLD = 0.70f;
 
     // OpenCV refinement settings
-    private static final int CANNY_THRESHOLD_LOW = 50;
-    private static final int CANNY_THRESHOLD_HIGH = 150;
-    private static final double MIN_CONTOUR_AREA_RATIO = 0.3;
-    private static final double MAX_CONTOUR_AREA_RATIO = 0.95;
-    private static final double CORNER_EPSILON_FACTOR = 0.02;
+    private int CANNY_THRESHOLD_LOW = 50;
+    private int CANNY_THRESHOLD_HIGH = 150;
+    private double MIN_CONTOUR_AREA_RATIO = 0.3;
+    private double MAX_CONTOUR_AREA_RATIO = 0.95;
+    private double CORNER_EPSILON_FACTOR = 0.02;
 
     private final MRZGuidanceOverlay guidanceOverlay;
     private final PreviewView previewView;
@@ -70,11 +71,24 @@ public class DocumentAlignmentDetector {
 
     private boolean wasAlignedLastFrame = false;
 
-    public DocumentAlignmentDetector(MRZGuidanceOverlay guidanceOverlay, PreviewView previewView) {
+    public DocumentAlignmentDetector(MRZGuidanceOverlay guidanceOverlay,
+                                     PreviewView previewView,
+                                     Configuration config) {
         this.guidanceOverlay = guidanceOverlay;
         this.previewView = previewView;
         this.mainHandler = new Handler(Looper.getMainLooper());
         this.executorService = Executors.newSingleThreadExecutor();
+
+        this.REQUIRED_CONSECUTIVE_FRAMES = config.requiredConsecutiveFrames;
+        this.DETECTION_COOLDOWN_MS = config.detectionCooldownMs;
+        this.POSITION_TOLERANCE = config.positionTolerance;
+        this.SIZE_TOLERANCE = config.sizeTolerance;
+        this.IOU_THRESHOLD = config.iouThreshold;
+        this.CANNY_THRESHOLD_LOW = config.cannyThresholdLow;
+        this.CANNY_THRESHOLD_HIGH = config.cannyThresholdHigh;
+        this.MIN_CONTOUR_AREA_RATIO = config.minContourAreaRatio;
+        this.MAX_CONTOUR_AREA_RATIO = config.maxContourAreaRatio;
+        this.CORNER_EPSILON_FACTOR = config.cornerEpsilonFactor;
 
         ObjectDetectorOptions options = new ObjectDetectorOptions.Builder()
                 .setDetectorMode(ObjectDetectorOptions.SINGLE_IMAGE_MODE)
@@ -658,7 +672,10 @@ public class DocumentAlignmentDetector {
         boolean positionOk = Math.abs(normalizedOffsetX) <= POSITION_TOLERANCE &&
                 Math.abs(normalizedOffsetY) <= POSITION_TOLERANCE;
 
-        boolean sizeOk = areaRatio >= 0.75f && areaRatio <= 1.30f;
+//        boolean sizeOk = areaRatio >= 0.75f && areaRatio <= 1.30f;
+
+        boolean sizeOk = areaRatio >= (1.0f - SIZE_TOLERANCE) &&
+                areaRatio <= (1.0f + SIZE_TOLERANCE);
 
         float positionScore = 1f - (Math.abs(normalizedOffsetX) + Math.abs(normalizedOffsetY)) / 2f;
         float sizeScore = 1f - Math.abs(1f - areaRatio);
@@ -714,6 +731,7 @@ public class DocumentAlignmentDetector {
             return offsetX > 0 ? "Move document LEFT ←" : "Move document RIGHT →";
         }
 
+
         if (areaRatio < 0.80f) {
             return "Move closer to document";
         }
@@ -730,7 +748,8 @@ public class DocumentAlignmentDetector {
 
     private AlignmentResult processAnalysis(AlignmentAnalysis analysis, Point[] corners) {
         // Hysteresis: use lower threshold to MAINTAIN alignment, higher to GAIN it
-        float effectiveIouThreshold = wasAlignedLastFrame ? 0.65f : IOU_THRESHOLD;
+//        float effectiveIouThreshold = wasAlignedLastFrame ? 0.65f : IOU_THRESHOLD;
+        float effectiveIouThreshold = wasAlignedLastFrame ? (IOU_THRESHOLD * 0.9f) : IOU_THRESHOLD;
 
         boolean isAligned = analysis.iou >= effectiveIouThreshold &&
                 analysis.positionOk &&
@@ -742,6 +761,9 @@ public class DocumentAlignmentDetector {
             Log.d(TAG, "✅ Aligned! Count: " + consecutiveAlignmentCount + "/" + REQUIRED_CONSECUTIVE_FRAMES);
 
             if (consecutiveAlignmentCount >= REQUIRED_CONSECUTIVE_FRAMES) {
+                Log.d(TAG, "🎯 consecutiveAlignmentCount: " + consecutiveAlignmentCount +
+                        " >= REQUIRED_CONSECUTIVE_FRAMES: " + REQUIRED_CONSECUTIVE_FRAMES);
+
                 Log.d(TAG, "🎯 ALIGNMENT COMPLETE - Stopping detector");
 
                 return new AlignmentResult(true, true, analysis.score,

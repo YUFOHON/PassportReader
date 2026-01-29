@@ -41,7 +41,7 @@ import java.util.List;
 
 public class MRZDetectionHandler {
     private static final String TAG = "MRZDetectionHandler";
-    private static final long PROCESS_INTERVAL = 0;
+    private long PROCESS_INTERVAL = 0;
 
     private final Context context;
     private final TextRecognizer recognizer;
@@ -64,7 +64,8 @@ public class MRZDetectionHandler {
                                TextView instructionLabel, TextView documentTypeLabel,
                                TextView resultLabel, MrzParserManager mrzParserManager,
                                DocumentAlignmentDetector alignmentDetector,
-                               CameraManager cameraManager) {
+                               CameraManager cameraManager,
+                               long processInterval) {
         this.context = context;
         this.recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
         this.alignmentDetector = alignmentDetector;
@@ -75,7 +76,7 @@ public class MRZDetectionHandler {
         this.uiUpdater = new UIUpdater(context, guidanceOverlay, instructionLabel,
                 documentTypeLabel, resultLabel);
         this.cameraManager = cameraManager;
-
+        this.PROCESS_INTERVAL = processInterval;
         Log.d(TAG, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         Log.d(TAG, "✅ MRZDetectionHandler initialized");
         Log.d(TAG, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");

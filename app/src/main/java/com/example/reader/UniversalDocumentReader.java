@@ -130,9 +130,7 @@ public class UniversalDocumentReader {
             try {
                 Log.d(TAG, "Starting document read with: " + reader.getReaderName());
 
-                IDocumentReader.ProgressCallback progressCallback = (message, progress) -> {
-                    notifyProgress(message, progress);
-                };
+                IDocumentReader.ProgressCallback progressCallback = this::notifyProgress;
 
                 DocumentData result = reader.readDocument(tag, authData, progressCallback);
 

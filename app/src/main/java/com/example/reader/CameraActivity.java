@@ -47,7 +47,7 @@ public class CameraActivity extends AppCompatActivity {
     private ExecutorService cameraExecutor;
 
     @Override
-    protected void onCreate(Bundle savedInstanceState) {
+    protected void onCreate(Bundle savedInstanceState)     {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_camera);
 
@@ -88,8 +88,14 @@ public class CameraActivity extends AppCompatActivity {
         cameraExecutor = Executors.newSingleThreadExecutor();
         mrzParserManager = new MrzParserManager();
 
+        Configuration config = DocumentReaderSDK.getInstance().getConfiguration();
+
         // Step 1: Create alignment detector (no dependencies)
-        alignmentDetector = new DocumentAlignmentDetector(guidanceOverlay, previewView);
+        alignmentDetector = new DocumentAlignmentDetector(
+                guidanceOverlay,
+                previewView,
+                config
+        );
 
         // Step 2: Create camera manager WITHOUT detection handler
         cameraManager = new CameraManager(
@@ -107,7 +113,8 @@ public class CameraActivity extends AppCompatActivity {
                 resultLabel,
                 mrzParserManager,
                 alignmentDetector,
-                cameraManager
+                cameraManager,
+                config.processInterval
         );
 
         // Step 4: Now inject the detection handler into camera manager
