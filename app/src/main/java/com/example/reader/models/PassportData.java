@@ -78,7 +78,7 @@ public class PassportData extends DocumentData {
     public boolean hasActiveAuthentication;
     public boolean activeAuthenticationPerformed;
     public boolean chipAuthenticationPerformed;
-    public String signingCountry;
+//    public String signingCountry;
     public String documentSignerCertificate;
     public byte[] rawSODData;
     public Map<Integer, byte[]> dataGroupHashes = new HashMap<>();
@@ -184,7 +184,7 @@ public class PassportData extends DocumentData {
         sb.append("  hasActiveAuthentication=").append(hasActiveAuthentication).append("\n");
         sb.append("  activeAuthenticationPerformed=").append(activeAuthenticationPerformed).append("\n");
         sb.append("  hasValidSignature=").append(hasValidSignature).append("\n");
-        sb.append("  signingCountry='").append(signingCountry).append("'\n");
+//        sb.append("  signingCountry='").append(signingCountry).append("'\n");
         sb.append("  hasFingerprintData=").append(hasFingerprintData).append("\n");
         sb.append("  hasIrisData=").append(hasIrisData).append("\n");
         sb.append("  faceImages.size=").append(faceImages != null ? faceImages.size() : 0).append("\n");

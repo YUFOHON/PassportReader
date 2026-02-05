@@ -3,6 +3,8 @@
     import android.app.Activity;
     import android.content.Intent;
     import android.nfc.Tag;
+    import android.util.Log;
+
     import androidx.annotation.NonNull;
     import androidx.fragment.app.FragmentActivity;
 
@@ -18,7 +20,8 @@
         private static DocumentReaderSDK instance;
 
         private WeakReference<Activity> activityRef;  // Use WeakReference
-        private WeakReference<DocumentReaderCallback> callbackRef;  // Use WeakReference
+//        private WeakReference<DocumentReaderCallback> callbackRef;  // Use WeakReference
+        private DocumentReaderCallback callback;
 
     //    private Activity activity;
         private UniversalDocumentReader nfcReader;
@@ -91,11 +94,16 @@
     //        this.callback = callback;
     //    }
         public void setCallback(DocumentReaderCallback callback) {
-        this.callbackRef = new WeakReference<>(callback);
-    }
+            Log.d("@@>> DocumentReaderSDK", "✅ DocumentReaderCallback set");
+//            this.callbackRef = new WeakReference<>(callback);
+            this.callback = callback;
 
-        private DocumentReaderCallback getCallback() {
-            return callbackRef != null ? callbackRef.get() : null;
+        }
+
+        DocumentReaderCallback getCallback() {
+//            return callbackRef != null ? callbackRef.get() : null;
+            return callback;
+
         }
         // ==================== SCAN MRZ ====================
 
@@ -141,7 +149,7 @@
         // ==================== NFC READING ====================
 
         public void startNfcReading() {
-            DocumentReaderCallback callback = getCallback();  // Add this
+            DocumentReaderCallback callback = getCallback();
 
             if (!nfcHelper.isNfcAvailable()) {
                 if (callback != null) callback.onError(ErrorType.NFC_NOT_AVAILABLE, "NFC not available");
@@ -190,6 +198,8 @@
         }
 
         public void release() {
+            callback = null;
+
             if (nfcReader != null) {
                 nfcReader.cancelRead();
             }
@@ -197,7 +207,7 @@
                 nfcHelper.disableForegroundDispatch();
             }
             activityRef = null;
-            callbackRef = null;
+//            callbackRef = null;
             nfcReader = null;
             nfcHelper = null;
         }
@@ -206,33 +216,53 @@
             Activity activity = activityRef != null ? activityRef.get() : null;
             return (activity != null && !activity.isFinishing()) ? activity : null;
         }
+
         private void setupNfcReaderCallback() {
             nfcReader.setCallback(new UniversalDocumentReader.DocumentReadCallback() {
                 @Override
                 public void onReadStart(DocumentData.DocumentType type) {
+                    Log.d("@@>> DocumentReaderSDK", "NFC read started for type: " + type);
                     DocumentReaderCallback cb = getCallback();
-                    if (cb != null) cb.onNfcReadProgress("Starting...", 0);
+                    if (cb != null) {
+                        Log.d("@@>> DocumentReaderSDK", "✅ Forwarding onReadStart to plugin");
+                        cb.onNfcReadProgress("Starting...", 0);
+                    } else {
+                        Log.d("@@>> DocumentReaderSDK", "❌ No callback to forward onReadStart");
+                    }
                 }
 
                 @Override
                 public void onReadProgress(String message, int progress) {
+                    Log.d("@@>> DocumentReaderSDK", "NFC read progress: " + message + " (" + progress + "%)");
                     DocumentReaderCallback cb = getCallback();
-                    if (cb != null) cb.onNfcReadProgress(message, progress);
-                }
+                    if (cb != null) {
+                        Log.d("@@>> DocumentReaderSDK", "✅ Forwarding progress to plugin");
+                        cb.onNfcReadProgress(message, progress);
+                    }                }
 
                 @Override
                 public void onReadSuccess(DocumentData data) {
+                    Log.d("@@>> DocumentReaderSDK", "NFC read successful");
                     stopNfcReading();
                     DocumentReaderCallback cb = getCallback();
-                    if (cb != null) cb.onDocumentRead(data);
-                }
+                    if (cb != null) {
+                        Log.d("@@>> DocumentReaderSDK", "✅✅✅ Forwarding onDocumentRead to plugin callback");
+                        cb.onDocumentRead(data);
+                    } else {
+                        Log.d("@@>> DocumentReaderSDK", "❌❌❌ ERROR: Callback is null!");
+//                        Log.d("@@>> DocumentReaderSDK", "   callbackRef is null? " + (callbackRef == null));
+//                        Log.d("@@>> DocumentReaderSDK", "   callbackRef.get() is null? " + (callbackRef != null && callbackRef.get() == null));
+                    }                }
 
                 @Override
                 public void onReadError(String message, Exception e) {
+                    Log.d("@@>> DocumentReaderSDK", "NFC read error: " + message, e);
                     stopNfcReading();
                     DocumentReaderCallback cb = getCallback();
-                    if (cb != null) cb.onError(ErrorType.NFC_READ_FAILED, message);
-                }
+                    if (cb != null) {
+                        Log.d("@@>> DocumentReaderSDK", "✅ Forwarding error to plugin");
+                        cb.onError(ErrorType.NFC_READ_FAILED, message);
+                    }                }
             });
         }
     }

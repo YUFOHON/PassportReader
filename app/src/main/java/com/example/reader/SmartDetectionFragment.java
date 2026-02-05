@@ -467,7 +467,7 @@ public class SmartDetectionFragment extends Fragment {
 
         if (data.rawSODData != null) {
             result.append("Status: ").append(data.hasValidSignature ? "Valid ✓" : "Present").append("\n");
-            result.append("Signer: ").append(data.signingCountry != null ? data.signingCountry : "Unknown").append("\n");
+//            result.append("Signer: ").append(data.signingCountry != null ? data.signingCountry : "Unknown").append("\n");
             result.append("Size: ").append(data.rawSODData.length).append(" bytes\n");
 
             if (data.dataGroupHashes != null && !data.dataGroupHashes.isEmpty()) {
@@ -967,12 +967,7 @@ public class SmartDetectionFragment extends Fragment {
         result.append("───────────────────────────────\n");
         result.append("✈️ VALIDITY\n");
         result.append("───────────────────────────────\n");
-        if (data.validForHongKong) {
-            result.append("  ✓ Hong Kong\n");
-        }
-        if (data.validForMacao) {
-            result.append("  ✓ Macao\n");
-        }
+
         result.append("\n");
 
         // Face Image

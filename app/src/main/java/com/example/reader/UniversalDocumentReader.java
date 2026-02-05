@@ -137,9 +137,12 @@ public class UniversalDocumentReader {
                 Log.d(TAG, "Document read completed: " + result.getSummary());
 
                 isReading = false;
-
+                Log.d(TAG, "call the callback");
                 if (callback != null) {
+                    Log.d(TAG, "✅ Invoking success callback");
                     callback.onReadSuccess(result);
+                }else{
+                    Log.d(TAG, "❌ Callback is null, cannot notify success");
                 }
 
             } catch (Exception e) {

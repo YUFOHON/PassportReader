@@ -1,6 +1,7 @@
 package com.example.reader;
 
 import android.Manifest;
+import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
@@ -29,7 +30,7 @@ import java.util.concurrent.Executors;
 
 public class CameraActivity extends AppCompatActivity {
 
-    private static final String TAG = "CameraActivity@@>>";
+    private static final String TAG = "@@>> CameraActivity";
     private static final int CAMERA_PERMISSION_REQUEST = 10;
 
     // UI Components
@@ -82,6 +83,12 @@ public class CameraActivity extends AppCompatActivity {
         previewView = findViewById(R.id.viewFinder);
         documentTypeLabel = findViewById(R.id.documentTypeLabel);
         resultLabel = findViewById(R.id.resultLabel);
+        findViewById(R.id.btnCancel).setOnClickListener(v -> {
+            Log.d(TAG, "❌ Scan cancelled by user");
+            Intent resultIntent = new Intent();
+            setResult(Activity.RESULT_CANCELED, resultIntent);
+            finish();
+        });
     }
 
     private void initializeManagers() {
@@ -148,8 +155,22 @@ public class CameraActivity extends AppCompatActivity {
     }
 
     @Override
+    public void onBackPressed() {
+        // Return cancelled result when back button is pressed
+        setResult(Activity.RESULT_CANCELED);
+        super.onBackPressed();
+    }
+
+    @Override
     protected void onDestroy() {
         super.onDestroy();
+
+        if (!isFinishing()) {
+            // Return cancelled result
+            Intent resultIntent = new Intent();
+            setResult(Activity.RESULT_CANCELED, resultIntent);
+        }
+
         if (cameraManager != null) {
             cameraManager.cleanup();
         }

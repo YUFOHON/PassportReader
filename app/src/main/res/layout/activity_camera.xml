@@ -67,4 +67,17 @@
         android:layout_marginEnd="16dp"
         android:fontFamily="monospace" />
 
+    <!-- Add this inside your ConstraintLayout, before the closing tag -->
+    <ImageButton
+        android:id="@+id/btnCancel"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:src="@android:drawable/ic_menu_close_clear_cancel"
+        android:background="#80000000"
+        android:padding="12dp"
+        android:layout_margin="16dp"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:contentDescription="Cancel" />
+
 </androidx.constraintlayout.widget.ConstraintLayout>

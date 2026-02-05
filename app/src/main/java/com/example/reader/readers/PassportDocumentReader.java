@@ -180,6 +180,9 @@ public class PassportDocumentReader implements IDocumentReader {
         }
 
         Log.d(TAG, "📖 Starting COMPLETE passport read (ALL Data Groups)...");
+        if (progressCallback != null) {
+            progressCallback.onProgress("Connecting to chip...", 5);
+        }
 
         IsoDep isoDep = IsoDep.get(tag);
         if (isoDep == null) {
@@ -201,10 +204,18 @@ public class PassportDocumentReader implements IDocumentReader {
         );
         service.open();
 
+        if (progressCallback != null) {
+            progressCallback.onProgress("Connected to chip", 10);
+        }
+
         PassportData result = new PassportData();
 
         try {
             BACKeySpec bacKey = new BACKey(docNumber, birthDate, expiryDate);
+
+            if (progressCallback != null) {
+                progressCallback.onProgress("Authenticating...", 15);
+            }
 
             AuthMethod authMethod = performSmartAuthentication(service, cardService, bacKey);
             result.authenticationMethod = authMethod.toString();
@@ -212,6 +223,9 @@ public class PassportDocumentReader implements IDocumentReader {
 
             Log.d(TAG, "🔒 Secure messaging active: " + (service.getWrapper() != null));
 
+            if (progressCallback != null) {
+                progressCallback.onProgress("Reading security data...", 20);
+            }
             readSOD(service, result);
 
             if (result.dataGroupHashes != null && !result.dataGroupHashes.isEmpty()) {
@@ -219,33 +233,160 @@ public class PassportDocumentReader implements IDocumentReader {
                 Log.d(TAG, "✓ Available Data Groups from SOD: " + result.availableDataGroups);
             }
 
+            // Calculate progress increments based on available data groups
+            int totalDGs = result.availableDataGroups != null ? result.availableDataGroups.size() : 16;
+            int baseProgress = 25;
+            int progressPerDG = Math.max(1, (80 - baseProgress) / Math.max(1, totalDGs));
+            int currentProgress = baseProgress;
+
+            if (progressCallback != null) {
+                progressCallback.onProgress("Reading document data (DG1)...", currentProgress);
+            }
             readDG1(service, result);
-            readDG2(service, result);
+            currentProgress += progressPerDG;
 
-            if (result.availableDataGroups.contains(3)) readDG3(service, result);
-            if (result.availableDataGroups.contains(4)) readDG4(service, result);
-            if (result.availableDataGroups.contains(5)) readDG5(service, result);
-            if (result.availableDataGroups.contains(6)) readDG6(service, result);
-            if (result.availableDataGroups.contains(7)) readDG7(service, result);
-            if (result.availableDataGroups.contains(8)) readDG8(service, result);
-            if (result.availableDataGroups.contains(9)) readDG9(service, result);
-            if (result.availableDataGroups.contains(10)) readDG10(service, result);
-            if (result.availableDataGroups.contains(11)) readDG11(service, result);
-            if (result.availableDataGroups.contains(12)) readDG12(service, result);
-            if (result.availableDataGroups.contains(13)) readDG13(service, result);
-            if (result.availableDataGroups.contains(14)) readDG14(service, result);
-            if (result.availableDataGroups.contains(15)) readDG15(service, result);
-            if (result.availableDataGroups.contains(16)) readDG16(service, result);
+            if (progressCallback != null) {
+                progressCallback.onProgress("Reading face image (DG2)...", currentProgress);
+            }
+            readDG2(service, result, progressCallback);
+            currentProgress += progressPerDG;
 
+            if (result.availableDataGroups.contains(3)) {
+                if (progressCallback != null) {
+                    progressCallback.onProgress("Reading fingerprints (DG3)...", currentProgress);
+                }
+                readDG3(service, result);
+                currentProgress += progressPerDG;
+            }
+
+            if (result.availableDataGroups.contains(4)) {
+                if (progressCallback != null) {
+                    progressCallback.onProgress("Reading iris data (DG4)...", currentProgress);
+                }
+                readDG4(service, result);
+                currentProgress += progressPerDG;
+            }
+
+            if (result.availableDataGroups.contains(5)) {
+                if (progressCallback != null) {
+                    progressCallback.onProgress("Reading displayed portrait (DG5)...", currentProgress);
+                }
+                readDG5(service, result);
+                currentProgress += progressPerDG;
+            }
+
+            if (result.availableDataGroups.contains(6)) {
+                if (progressCallback != null) {
+                    progressCallback.onProgress("Reading reserved data (DG6)...", currentProgress);
+                }
+                readDG6(service, result);
+                currentProgress += progressPerDG;
+            }
+
+            if (result.availableDataGroups.contains(7)) {
+                if (progressCallback != null) {
+                    progressCallback.onProgress("Reading signature (DG7)...", currentProgress);
+                }
+                readDG7(service, result);
+                currentProgress += progressPerDG;
+            }
+
+            if (result.availableDataGroups.contains(8)) {
+                if (progressCallback != null) {
+                    progressCallback.onProgress("Reading data features (DG8)...", currentProgress);
+                }
+                readDG8(service, result);
+                currentProgress += progressPerDG;
+            }
+
+            if (result.availableDataGroups.contains(9)) {
+                if (progressCallback != null) {
+                    progressCallback.onProgress("Reading structure features (DG9)...", currentProgress);
+                }
+                readDG9(service, result);
+                currentProgress += progressPerDG;
+            }
+
+            if (result.availableDataGroups.contains(10)) {
+                if (progressCallback != null) {
+                    progressCallback.onProgress("Reading substance features (DG10)...", currentProgress);
+                }
+                readDG10(service, result);
+                currentProgress += progressPerDG;
+            }
+
+            if (result.availableDataGroups.contains(11)) {
+                if (progressCallback != null) {
+                    progressCallback.onProgress("Reading personal details (DG11)...", currentProgress);
+                }
+                readDG11(service, result);
+                currentProgress += progressPerDG;
+            }
+
+            if (result.availableDataGroups.contains(12)) {
+                if (progressCallback != null) {
+                    progressCallback.onProgress("Reading document details (DG12)...", currentProgress);
+                }
+                readDG12(service, result);
+                currentProgress += progressPerDG;
+            }
+
+            if (result.availableDataGroups.contains(13)) {
+                if (progressCallback != null) {
+                    progressCallback.onProgress("Reading optional details (DG13)...", currentProgress);
+                }
+                readDG13(service, result);
+                currentProgress += progressPerDG;
+            }
+
+            if (result.availableDataGroups.contains(14)) {
+                if (progressCallback != null) {
+                    progressCallback.onProgress("Reading security options (DG14)...", currentProgress);
+                }
+                readDG14(service, result);
+                currentProgress += progressPerDG;
+            }
+
+            if (result.availableDataGroups.contains(15)) {
+                if (progressCallback != null) {
+                    progressCallback.onProgress("Reading active authentication (DG15)...", currentProgress);
+                }
+                readDG15(service, result);
+                currentProgress += progressPerDG;
+            }
+
+            if (result.availableDataGroups.contains(16)) {
+                if (progressCallback != null) {
+                    progressCallback.onProgress("Reading emergency contacts (DG16)...", currentProgress);
+                }
+                readDG16(service, result);
+                currentProgress += progressPerDG;
+            }
+
+            // Perform security validations
             if (result.hasActiveAuthentication) {
+                if (progressCallback != null) {
+                    progressCallback.onProgress("Performing active authentication...", 85);
+                }
                 performActiveAuthentication(service, result);
             }
 
             if (result.hasChipAuthentication) {
+                if (progressCallback != null) {
+                    progressCallback.onProgress("Performing chip authentication...", 90);
+                }
                 performChipAuthentication(service, result);
             }
 
+            if (progressCallback != null) {
+                progressCallback.onProgress("Finalizing data...", 95);
+            }
+
             Log.d(TAG, "✅ COMPLETE passport read finished - ALL Data Groups processed");
+
+            if (progressCallback != null) {
+                progressCallback.onProgress("Complete", 100);
+            }
 
         } finally {
             try { service.close(); } catch (Exception e) { }
@@ -280,13 +421,19 @@ public class PassportDocumentReader implements IDocumentReader {
         }
     }
 
-    private void readDG2(PassportService service, PassportData result) {
+    private void readDG2(PassportService service, PassportData result,ProgressCallback progressCallback) {
         try {
             Log.d(TAG, "📸 Reading DG2 (Face Image)...");
             InputStream is = service.getInputStream(PassportService.EF_DG2);
             DG2File dg2 = new DG2File(is);
 
             List<FaceInfo> faceInfos = dg2.getFaceInfos();
+            int totalImages = faceInfos.stream()
+                    .mapToInt(f -> f.getFaceImageInfos().size())
+                    .sum();
+
+            int processed = 0;
+
             for (FaceInfo faceInfo : faceInfos) {
                 List<FaceImageInfo> faceImageInfos = faceInfo.getFaceImageInfos();
                 for (FaceImageInfo faceImageInfo : faceImageInfos) {
@@ -312,6 +459,13 @@ public class PassportDocumentReader implements IDocumentReader {
                         result.faceImages.add(bitmap);
                         Log.d(TAG, "✓ Decoded face image: " + bitmap.getWidth() + "x" + bitmap.getHeight());
                     }
+
+                    processed++;
+                    if (progressCallback != null) {
+                        int progress = 20 + (int) ((processed / (float) totalImages) * 15);
+                        progressCallback.onProgress("Decoding face images...", progress);
+                    }
+
                 }
             }
             Log.d(TAG, "✓ DG2: " + result.faceImages.size() + " image(s) successfully decoded");
@@ -720,9 +874,9 @@ public class PassportDocumentReader implements IDocumentReader {
 
             SODFile sodFile = new SODFile(new ByteArrayInputStream(sodBytes));
 
-            if (sodFile.getIssuerX500Principal() != null) {
-                result.signingCountry = sodFile.getIssuerX500Principal().getName();
-            }
+//            if (sodFile.getIssuerX500Principal() != null) {
+//                result.signingCountry = sodFile.getIssuerX500Principal().getName();
+//            }
 
             if (sodFile.getDocSigningCertificate() != null) {
                 result.documentSignerCertificate = sodFile.getDocSigningCertificate().toString();
