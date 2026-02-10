@@ -10,6 +10,7 @@ import android.util.Log;
 
 import androidx.camera.view.PreviewView;
 
+import com.example.reader.ConfigManager;
 import com.example.reader.Configuration;
 import com.example.reader.MRZGuidanceOverlay;
 import com.example.reader.utils.BitmapUtils;
@@ -72,12 +73,12 @@ public class DocumentAlignmentDetector {
     private boolean wasAlignedLastFrame = false;
 
     public DocumentAlignmentDetector(MRZGuidanceOverlay guidanceOverlay,
-                                     PreviewView previewView,
-                                     Configuration config) {
+                                     PreviewView previewView) {
         this.guidanceOverlay = guidanceOverlay;
         this.previewView = previewView;
         this.mainHandler = new Handler(Looper.getMainLooper());
         this.executorService = Executors.newSingleThreadExecutor();
+        Configuration config = ConfigManager.getInstance().getConfiguration();
 
         this.REQUIRED_CONSECUTIVE_FRAMES = config.requiredConsecutiveFrames;
         this.DETECTION_COOLDOWN_MS = config.detectionCooldownMs;

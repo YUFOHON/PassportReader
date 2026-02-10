@@ -16,6 +16,8 @@ import androidx.camera.core.ImageProxy;
 import androidx.camera.view.PreviewView;
 import androidx.core.content.ContextCompat;
 
+import com.example.reader.ConfigManager;
+import com.example.reader.Configuration;
 import com.example.reader.MRZGuidanceOverlay;
 import com.example.reader.camera.CameraManager;
 import com.example.reader.mrz.MRZProcessor;
@@ -64,8 +66,7 @@ public class MRZDetectionHandler {
                                TextView instructionLabel, TextView documentTypeLabel,
                                TextView resultLabel, MrzParserManager mrzParserManager,
                                DocumentAlignmentDetector alignmentDetector,
-                               CameraManager cameraManager,
-                               long processInterval) {
+                               CameraManager cameraManager) {
         this.context = context;
         this.recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
         this.alignmentDetector = alignmentDetector;
@@ -76,9 +77,15 @@ public class MRZDetectionHandler {
         this.uiUpdater = new UIUpdater(context, guidanceOverlay, instructionLabel,
                 documentTypeLabel, resultLabel);
         this.cameraManager = cameraManager;
-        this.PROCESS_INTERVAL = processInterval;
+
+        // Get process interval from ConfigManager singleton
+        Configuration config = ConfigManager.getInstance().getConfiguration();
+        this.PROCESS_INTERVAL = config.getProcessInterval();
+
         Log.d(TAG, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         Log.d(TAG, "✅ MRZDetectionHandler initialized");
+        Log.d(TAG, "📸 Save image: " + config.isSaveCapturedImage());
+        Log.d(TAG, "🔄 Process interval: " + this.PROCESS_INTERVAL);
         Log.d(TAG, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     }
 
@@ -156,14 +163,17 @@ public class MRZDetectionHandler {
 
         if (alignmentResult.isAligned) {
             Log.d(TAG, "✅ Document aligned - Processing preview OCR");
+            finalizeImageProcessing(imageProxy);
 
-            recognizer.process(image)
-                    .addOnSuccessListener(text -> {
-                        Log.d(TAG, "📝 Preview OCR Success - Text blocks: " + text.getTextBlocks().size());
-                        processPreviewOCRResult(text);
-                    })
-                    .addOnFailureListener(e -> Log.e(TAG, "❌ Preview OCR failed", e))
-                    .addOnCompleteListener(task -> finalizeImageProcessing(imageProxy));
+            // Skip preview OCR, go straight to high-res capture
+            captureHighResAndProcess();
+//            recognizer.process(image)
+//                    .addOnSuccessListener(text -> {
+//                        Log.d(TAG, "📝 Preview OCR Success - Text blocks: " + text.getTextBlocks().size());
+//                        processPreviewOCRResult(text);
+//                    })
+//                    .addOnFailureListener(e -> Log.e(TAG, "❌ Preview OCR failed", e))
+//                    .addOnCompleteListener(task -> finalizeImageProcessing(imageProxy));
         } else {
             Log.d(TAG, "⏸️  Not aligned - Skipping OCR");
             mrzProcessor.resetDetection();
@@ -324,17 +334,34 @@ public class MRZDetectionHandler {
 
         Activity activity = (Activity) context;
 
-        if (lastHighResBitmap != null) {
+        boolean shouldSave = ConfigManager.getInstance().shouldSaveCapturedImage();
+        String base64Image = null;
+
+        if (shouldSave && lastHighResBitmap != null) {
             String savedPath = BitmapUtils.saveBitmapToFile(context, lastHighResBitmap);
             Log.d(TAG, "📷 High-res document saved: " + savedPath);
+
+            // TODO Optional: Store the base64 in the result for demonstration (not recommended for large images in production)
+            base64Image = BitmapUtils.bitmapToBase64(lastHighResBitmap);
+
+        } else if (lastHighResBitmap != null) {
+            Log.d(TAG, "📸 Image saving is disabled");
         } else {
             Log.w(TAG, "⚠️ No high-res bitmap available");
         }
 
-        sendResultAndFinish(activity, result);
+
+//        if (lastHighResBitmap != null) {
+//            String savedPath = BitmapUtils.saveBitmapToFile(context, lastHighResBitmap);
+//            Log.d(TAG, "📷 High-res document saved: " + savedPath);
+//        } else {
+//            Log.w(TAG, "⚠️ No high-res bitmap available");
+//        }
+
+        sendResultAndFinish(activity, result,base64Image);
     }
 
-    private void sendResultAndFinish(Activity activity, MRZProcessor.DetectionResult result) {
+    private void sendResultAndFinish(Activity activity, MRZProcessor.DetectionResult result,String base64Image) {
         Intent resultIntent = new Intent();
 
         if (result.getMrzInfo() != null) {
@@ -344,6 +371,7 @@ public class MRZDetectionHandler {
             resultIntent.putExtra(Constants.EXTRA_DOB, mrzInfo.dateOfBirth);
             resultIntent.putExtra(Constants.EXTRA_EXPIRY, mrzInfo.expiryDate);
             resultIntent.putExtra(Constants.EXTRA_MRZ_LINES, result.getMrzLineCount());
+            resultIntent.putExtra(Constants.IMAGE_CAPTURE, base64Image);
 
             if (mrzInfo.documentCode != null && !mrzInfo.documentCode.isEmpty()) {
                 resultIntent.putExtra(Constants.EXTRA_DOC_TYPE, mrzInfo.documentCode);
@@ -360,7 +388,9 @@ public class MRZDetectionHandler {
             Log.d(TAG, "   ├─ DOB: " + mrzInfo.dateOfBirth);
             Log.d(TAG, "   ├─ Expiry: " + mrzInfo.expiryDate);
             Log.d(TAG, "   ├─ MRZ Lines: " + result.getMrzLineCount());
-            Log.d(TAG, "   └─ Doc Type: " + mrzInfo.documentCode);
+            Log.d(TAG, "   ├─ Doc Type: " + mrzInfo.documentCode);
+            Log.d(TAG, "   └─ Base64 Included: " + (base64Image != null ? "YES" : "NO"));
+
         }
 
         uiUpdater.showSuccess();

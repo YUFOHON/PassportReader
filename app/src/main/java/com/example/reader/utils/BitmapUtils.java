@@ -17,6 +17,8 @@ import androidx.camera.view.PreviewView;
 
 import com.example.reader.MRZGuidanceOverlay;
 import com.google.mlkit.vision.common.InputImage;
+import android.util.Base64;
+import java.io.ByteArrayOutputStream;
 
 import org.opencv.core.Rect;
 
@@ -33,6 +35,97 @@ import java.nio.ByteBuffer;
  */
 public class BitmapUtils {
     private static final String TAG = "BitmapUtils";
+
+    public static String bitmapToBase64(Bitmap bitmap, int maxDimension, int quality) {
+        if (bitmap == null || bitmap.isRecycled()) {
+            Log.e("BitmapUtils", "Bitmap is null or recycled");
+            return null;
+        }
+
+        try {
+            // Reduce size significantly for Intent transmission
+            maxDimension = 800; // Reduce from 1200 to 800
+            quality = 70; // Reduce from 80 to 70
+
+            Bitmap finalBitmap = bitmap;
+
+            // Resize if needed
+            if (maxDimension > 0 && (bitmap.getWidth() > maxDimension || bitmap.getHeight() > maxDimension)) {
+                finalBitmap = resizeBitmap(bitmap, maxDimension);
+            }
+
+            // Compress to JPEG
+            ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+            boolean compressed = finalBitmap.compress(Bitmap.CompressFormat.JPEG, quality, byteArrayOutputStream);
+
+            if (!compressed) {
+                Log.w("BitmapUtils", "JPEG compression failed, trying PNG");
+                byteArrayOutputStream.reset();
+                finalBitmap.compress(Bitmap.CompressFormat.PNG, 100, byteArrayOutputStream);
+            }
+
+            byte[] byteArray = byteArrayOutputStream.toByteArray();
+            byteArrayOutputStream.close();
+
+            // Convert to base64
+            String base64Image = Base64.encodeToString(byteArray, Base64.NO_WRAP);
+
+            Log.d("BitmapUtils", "✅ Bitmap converted to Base64: " +
+                    bitmap.getWidth() + "x" + bitmap.getHeight() + " -> " +
+                    byteArray.length + " bytes -> " + base64Image.length() + " chars");
+
+            // Check if still too large
+            if (base64Image.length() > 100000) { // ~100KB
+                Log.w("BitmapUtils", "⚠️ Base64 still large: " + base64Image.length() + " chars");
+            }
+
+            // Clean up if we created a resized copy
+            if (finalBitmap != bitmap) {
+                finalBitmap.recycle();
+            }
+
+            return base64Image;
+
+        } catch (Exception e) {
+            Log.e("BitmapUtils", "❌ Error converting bitmap to Base64", e);
+            return null;
+        }
+    }
+
+    /**
+     * Convert Bitmap to Base64 string with default settings
+     * (Max dimension: 1200px, Quality: 80%)
+     */
+    public static String bitmapToBase64(Bitmap bitmap) {
+        return bitmapToBase64(bitmap, 1200, 80);
+    }
+
+    /**
+     * Resize bitmap to fit within max dimension while maintaining aspect ratio
+     */
+    private static Bitmap resizeBitmap(Bitmap bitmap, int maxDimension) {
+        int width = bitmap.getWidth();
+        int height = bitmap.getHeight();
+
+        // If already within limits, return original
+        if (width <= maxDimension && height <= maxDimension) {
+            return bitmap;
+        }
+
+        float ratio = (float) width / (float) height;
+        int newWidth, newHeight;
+
+        if (width > height) {
+            newWidth = maxDimension;
+            newHeight = (int) (maxDimension / ratio);
+        } else {
+            newHeight = maxDimension;
+            newWidth = (int) (maxDimension * ratio);
+        }
+
+        return Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true);
+    }
+
 
     /**
      * Converts an InputImage and ImageProxy to a Bitmap.

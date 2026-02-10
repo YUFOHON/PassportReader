@@ -19,7 +19,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 
 public class CameraManager {
-    private static final String TAG = "CameraManager";
+    private static final String TAG = "@@>> CameraManager";
 
     private final LifecycleOwner lifecycleOwner;
     private final PreviewView previewView;

@@ -5,11 +5,12 @@ import android.util.Log;
 public class Configuration {
 
     // DocumentAlignmentDetector settings
-    public int requiredConsecutiveFrames = 3;
+    public int requiredConsecutiveFrames = 1;
     public long detectionCooldownMs = 50;
     public float positionTolerance = 0.15f;
     public float sizeTolerance = 0.15f;
     public float iouThreshold = 0.70f;
+    private boolean saveCapturedImage = false;  // Default to false
 
     // OpenCV refinement settings
     public int cannyThresholdLow = 50;
@@ -21,7 +22,21 @@ public class Configuration {
     // MRZDetectionHandler settings
     public long processInterval = 0;
 
-    // Private constructor for builder pattern
+    // Public getter and setter for saveCapturedImage
+    public boolean isSaveCapturedImage() {
+        return saveCapturedImage;
+    }
+
+    public void setSaveCapturedImage(boolean saveCapturedImage) {
+        this.saveCapturedImage = saveCapturedImage;
+    }
+
+    // Getter for processInterval
+    public long getProcessInterval() {
+        return processInterval;
+    }
+
+    // Public constructor
     public Configuration() {}
 
     // Static Builder class
@@ -83,6 +98,11 @@ public class Configuration {
             return this;
         }
 
+        public Builder setSaveCapturedImage(boolean saveCapturedImage) {
+            config.setSaveCapturedImage(saveCapturedImage);
+            return this;
+        }
+
         public Configuration build() {
             String TAG = "@@>> Configuration";
             Log.d(TAG, "Building Configuration:");
@@ -97,6 +117,7 @@ public class Configuration {
             Log.d(TAG, "  minContourAreaRatio: " + config.minContourAreaRatio);
             Log.d(TAG, "  maxContourAreaRatio: " + config.maxContourAreaRatio);
             Log.d(TAG, "  cornerEpsilonFactor: " + config.cornerEpsilonFactor);
+            Log.d(TAG, "  saveCapturedImage: " + config.isSaveCapturedImage());
 
             return config;
         }

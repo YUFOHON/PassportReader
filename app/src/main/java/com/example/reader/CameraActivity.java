@@ -95,13 +95,12 @@ public class CameraActivity extends AppCompatActivity {
         cameraExecutor = Executors.newSingleThreadExecutor();
         mrzParserManager = new MrzParserManager();
 
-        Configuration config = DocumentReaderSDK.getInstance().getConfiguration();
+        Configuration config = ConfigManager.getInstance().getConfiguration();
 
         // Step 1: Create alignment detector (no dependencies)
         alignmentDetector = new DocumentAlignmentDetector(
                 guidanceOverlay,
-                previewView,
-                config
+                previewView
         );
 
         // Step 2: Create camera manager WITHOUT detection handler
@@ -120,8 +119,7 @@ public class CameraActivity extends AppCompatActivity {
                 resultLabel,
                 mrzParserManager,
                 alignmentDetector,
-                cameraManager,
-                config.processInterval
+                cameraManager
         );
 
         // Step 4: Now inject the detection handler into camera manager

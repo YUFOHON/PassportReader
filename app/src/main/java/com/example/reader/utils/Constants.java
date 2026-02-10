@@ -8,6 +8,7 @@ public class Constants {
     public static final String EXTRA_DOC_TYPE = "DOC_TYPE";
     public static final String EXTRA_MRZ_TEXT = "MRZ_TEXT";
     public static final String EXTRA_CAPTURED_IMAGE_PATH = "CAPTURED_IMAGE_PATH";
+    public static final String IMAGE_CAPTURE = "IMAGE_CAPTURE";
 
     public static final String DOC_TYPE_TD1 = "TD1";
     public static final String DOC_TYPE_TD2 = "TD2";

@@ -12,7 +12,7 @@ import java.util.stream.Collectors;
 
 public class MRZProcessor {
     private static final String TAG = "MRZProcessor";
-    private static final int REQUIRED_CONSECUTIVE_DETECTIONS = 3;
+    private static final int REQUIRED_CONSECUTIVE_DETECTIONS = 1;
     private static final float HIGH_CONFIDENCE_THRESHOLD = 0.7f;
 
     private final MrzParserManager parserManager;
@@ -187,6 +187,7 @@ public class MRZProcessor {
         public final int requiredCount;
         private final boolean shouldAccept;
         private final MRZInfo mrzInfo;
+        private final String imageCapture = "";
 
         DetectionResult(boolean mrzFound, int lineCount, String mrzText,
                         String documentType, float confidence,
@@ -206,6 +207,7 @@ public class MRZProcessor {
         public boolean shouldAccept() {
             return shouldAccept;
         }
+
 
         /**
          * Get the parsed MRZ information

@@ -36,8 +36,36 @@
 
         public static final int REQUEST_CODE_SCAN = 1001;
 
+        // ==================== CONFIGURATION METHODS ====================
+
+        /**
+         * Set the configuration using builder pattern
+         */
+        public void configure(Configuration config) {
+            ConfigManager.getInstance().setConfiguration(config);
+            Log.d("@@>> DocumentReaderSDK", "✅ Configuration updated");
+        }
+
+        /**
+         * Quick method to set saveCapturedImage flag
+         */
+        public void setSaveCapturedImage(boolean saveCapturedImage) {
+            ConfigManager.getInstance().setSaveCapturedImage(saveCapturedImage);
+        }
+
+        /**
+         * Get current configuration
+         */
         public Configuration getConfiguration() {
-            return configuration;
+            return ConfigManager.getInstance().getConfiguration();
+        }
+
+        /**
+         * Apply configuration using builder
+         */
+        public void applyConfiguration(Configuration.Builder builder) {
+            Configuration config = builder.build();
+            ConfigManager.getInstance().setConfiguration(config);
         }
 
         // ==================== CALLBACK INTERFACE ====================
